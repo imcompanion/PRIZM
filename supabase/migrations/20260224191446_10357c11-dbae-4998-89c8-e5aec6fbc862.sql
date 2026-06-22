@@ -1,0 +1,1 @@
+ALTER TABLE public.projects ADD COLUMN rate_card_discount numeric NOT NULL DEFAULT 0;

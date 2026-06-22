@@ -1,0 +1,1 @@
+ALTER TABLE public.project_scopes ADD COLUMN phase_percentages jsonb DEFAULT '{}'::jsonb;

@@ -1,0 +1,120 @@
+
+query ListProjects @auth(level: PUBLIC) {
+  projectss(limit: 50000) {
+    id title
+    opportunity_number: opportunityNumber
+    sf_account: sfAccount
+    parent_account: parentAccount
+    ultimate_parent: ultimateParent
+    office
+    start_date: startDate
+    end_date: endDate
+    rate_card_id: rateCardId
+    rate_card_discount: rateCardDiscount
+    fee_calc_currency: feeCalcCurrency
+    fx_rate_gbp: fxRateGbp
+    fx_rate_usd: fxRateUsd
+    price
+    media_cost: mediaCost
+    gross_budget: grossBudget
+    extra_data: extraData
+    opportunity_record_type: opportunityRecordType
+    stage
+  }
+}
+
+query GetProject($id: UUID!) @auth(level: PUBLIC) {
+  projects(id: $id) {
+    id title
+  }
+}
+
+query ListPeople @auth(level: PUBLIC) {
+  peoples(limit: 10000) {
+    id code name team office
+    role_id: roleId
+    overall_start_date: overallStartDate
+    overall_end_date: overallEndDate
+    employment_start_date: employmentStartDate
+    employment_end_date: employmentEndDate
+    status
+    annual_salary: annualSalary
+  }
+}
+
+query ListRoles @auth(level: PUBLIC) {
+  roless(limit: 10000) { id name billable_capacity_hours: billableCapacityHours }
+}
+
+query ListRateCards @auth(level: PUBLIC) {
+  rateCardss(limit: 10000) {
+    id name
+    hourly_rate: hourlyRate
+    currency
+    role_id: roleId
+  }
+}
+
+query ListTimeEntries @auth(level: PUBLIC) {
+  timeEntriess(limit: 1000, orderBy: [{date: DESC}]) {
+    id date hours notes
+    project_id: projectId
+    person_id: personId
+  }
+}
+
+query ListTimeEntriesByProject($projectId: UUID!) @auth(level: PUBLIC) {
+  timeEntriess(where: {projectId: {eq: $projectId}}) {
+    id date hours notes
+    project_id: projectId
+    person_id: personId
+  }
+}
+
+query ListProjectPhases @auth(level: PUBLIC) {
+  projectPhasess(limit: 10000) {
+    id
+    project_id: projectId
+    phase_name: phaseName
+    start_date: startDate
+    end_date: endDate
+    sort_order: sortOrder
+  }
+}
+
+query ListAllocations @auth(level: PUBLIC) {
+  allocationss(limit: 10000) {
+    id
+    person_id: personId
+    project_scope_id: projectScopeId
+    allocated_hours: allocatedHours
+  }
+}
+
+query ListDataImports @auth(level: PUBLIC) {
+  dataImportss(limit: 10000) {
+    dataset
+    last_imported_at: lastImportedAt
+    row_count: rowCount
+  }
+}
+
+query GetAppUserByEmail($email: String!) @auth(level: PUBLIC) {
+  appUserss(where: {email: {eq: $email}}) {
+    id
+    email
+    role
+    createdAt
+    addedBy
+  }
+}
+
+query ListAppUsers @auth(level: PUBLIC) {
+  appUserss(limit: 1000) {
+    id
+    email
+    role
+    createdAt
+    addedBy
+  }
+}

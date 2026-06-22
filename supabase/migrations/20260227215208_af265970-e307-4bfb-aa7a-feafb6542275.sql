@@ -1,0 +1,1 @@
+ALTER TABLE public.billability_rule_conditions ADD COLUMN logic_operator text NOT NULL DEFAULT 'and';

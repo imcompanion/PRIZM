@@ -1,0 +1,78 @@
+mutation InsertAllocations($allocatedHours: Float!, $createdAt: Date!, $id: UUID!, $personId: UUID, $projectScopeId: UUID) @auth(level: PUBLIC) {
+  allocations_insert(data: { allocatedHours: $allocatedHours, createdAt: $createdAt, id: $id, personId: $personId, projectScopeId: $projectScopeId })
+}
+
+mutation InsertBillabilityRuleConditions($createdAt: Date!, $field: String!, $id: UUID!, $logicOperator: String!, $operator: String!, $ruleId: UUID!, $value: String!) @auth(level: PUBLIC) {
+  billabilityRuleConditions_insert(data: { createdAt: $createdAt, field: $field, id: $id, logicOperator: $logicOperator, operator: $operator, ruleId: $ruleId, value: $value })
+}
+
+mutation InsertBillabilityRules($createdAt: Date!, $id: UUID!, $isBillable: Boolean!, $logicOperator: String!, $name: String!, $priority: Float!) @auth(level: PUBLIC) {
+  billabilityRules_insert(data: { createdAt: $createdAt, id: $id, isBillable: $isBillable, logicOperator: $logicOperator, name: $name, priority: $priority })
+}
+
+mutation InsertClientTeamAllocations($clientName: String!, $createdAt: Date!, $id: UUID!, $personId: UUID!, $priority: Float!, $roleId: UUID!) @auth(level: PUBLIC) {
+  clientTeamAllocations_insert(data: { clientName: $clientName, createdAt: $createdAt, id: $id, personId: $personId, priority: $priority, roleId: $roleId })
+}
+
+mutation InsertDailyAllocations($allocationId: UUID!, $createdAt: Date!, $date: Date!, $hours: Float!, $id: UUID!) @auth(level: PUBLIC) {
+  dailyAllocations_insert(data: { allocationId: $allocationId, createdAt: $createdAt, date: $date, hours: $hours, id: $id })
+}
+
+mutation InsertDataImports($dataset: String!, $id: UUID!, $lastImportedAt: String!, $rowCount: Float!) @auth(level: PUBLIC) {
+  dataImports_insert(data: { dataset: $dataset, id: $id, lastImportedAt: $lastImportedAt, rowCount: $rowCount })
+}
+
+mutation InsertPeople($annualSalary: Float, $code: String, $createdAt: Date!, $employmentEndDate: Date, $employmentStartDate: Date, $id: UUID!, $imcPercentage: Float, $monthlySalary: Float, $name: String!, $office: String!, $overallEndDate: Date, $overallStartDate: Date, $roleId: UUID, $status: String, $team: String, $type: String, $ukPercentage: Float, $usPercentage: Float) @auth(level: PUBLIC) {
+  people_insert(data: { annualSalary: $annualSalary, code: $code, createdAt: $createdAt, employmentEndDate: $employmentEndDate, employmentStartDate: $employmentStartDate, id: $id, imcPercentage: $imcPercentage, monthlySalary: $monthlySalary, name: $name, office: $office, overallEndDate: $overallEndDate, overallStartDate: $overallStartDate, roleId: $roleId, status: $status, team: $team, type: $type, ukPercentage: $ukPercentage, usPercentage: $usPercentage })
+}
+
+mutation InsertPhaseAllocations($allocationId: UUID, $createdAt: Date!, $hours: Float!, $id: UUID!, $phaseId: UUID!, $projectScopeId: UUID) @auth(level: PUBLIC) {
+  phaseAllocations_insert(data: { allocationId: $allocationId, createdAt: $createdAt, hours: $hours, id: $id, phaseId: $phaseId, projectScopeId: $projectScopeId })
+}
+
+mutation InsertProjectMonthlyRevenue($createdAt: Date!, $id: UUID!, $monthDate: Date!, $projectId: UUID!, $value: Float!) @auth(level: PUBLIC) {
+  projectMonthlyRevenue_insert(data: { createdAt: $createdAt, id: $id, monthDate: $monthDate, projectId: $projectId, value: $value })
+}
+
+mutation InsertProjectPhases($createdAt: Date!, $endDate: Date, $id: UUID!, $phaseName: String!, $projectId: UUID!, $sortOrder: Float!, $startDate: Date) @auth(level: PUBLIC) {
+  projectPhases_insert(data: { createdAt: $createdAt, endDate: $endDate, id: $id, phaseName: $phaseName, projectId: $projectId, sortOrder: $sortOrder, startDate: $startDate })
+}
+
+mutation InsertProjectScopes($createdAt: Date!, $id: UUID!, $phasePercentages: Any, $projectId: UUID, $roleId: UUID, $scopedHours: Float!) @auth(level: PUBLIC) {
+  projectScopes_insert(data: { createdAt: $createdAt, id: $id, phasePercentages: $phasePercentages, projectId: $projectId, roleId: $roleId, scopedHours: $scopedHours })
+}
+
+mutation InsertProjects($actualCost: Float, $bdbHours: Float, $budgetCost: Float, $closeDate: Date, $contractedInflCost: Float, $createdAt: Date!, $createdDate: Date, $dealValueDerisked: Float, $durationWeeks: Float, $durationWeeksRounded: Float, $endDate: Date!, $endWeek: String, $extraData: Any, $feeCalcCurrency: String, $fxLockDate: Date, $fxRateGbp: Float, $fxRateUsd: Float, $gpCheck: String, $gpFullValue: Float, $gpFullValuePerDay: Float, $gpMarginPct: Float, $grossBudget: Float, $hardCosts: Float, $hub: String, $id: UUID!, $industry: String, $inflProductionCosts: Float, $lastFeeCalcUrl: String, $leadSource: String, $mediaCost: Float, $newRepeat: String, $office: String, $opportunityNumber: String, $opportunityOwner: String, $opportunityRecordType: String, $originalLeadSource: String, $paidMediaFees: Float, $parentAccount: String, $phase1End: String, $phase1Name: String, $phase1Start: String, $phase2End: String, $phase2Name: String, $phase2Start: String, $phase3End: String, $phase3Name: String, $phase3Start: String, $phase4End: String, $phase4Name: String, $phase4Start: String, $price: Float, $probability: Float, $rateCardDiscount: Float!, $rateCardId: UUID, $revenue: Float, $sfAccount: String, $stage: String, $startDate: Date!, $startWeek: String, $title: String!, $totalFees: Float, $ultimateParent: String, $updatedAt: Date!, $valuePerWeekPhase1: Float, $valuePerWeekPhase2: Float, $valuePerWeekPhase3: Float, $valuePerWeekPhase4: Float) @auth(level: PUBLIC) {
+  projects_insert(data: { actualCost: $actualCost, bdbHours: $bdbHours, budgetCost: $budgetCost, closeDate: $closeDate, contractedInflCost: $contractedInflCost, createdAt: $createdAt, createdDate: $createdDate, dealValueDerisked: $dealValueDerisked, durationWeeks: $durationWeeks, durationWeeksRounded: $durationWeeksRounded, endDate: $endDate, endWeek: $endWeek, extraData: $extraData, feeCalcCurrency: $feeCalcCurrency, fxLockDate: $fxLockDate, fxRateGbp: $fxRateGbp, fxRateUsd: $fxRateUsd, gpCheck: $gpCheck, gpFullValue: $gpFullValue, gpFullValuePerDay: $gpFullValuePerDay, gpMarginPct: $gpMarginPct, grossBudget: $grossBudget, hardCosts: $hardCosts, hub: $hub, id: $id, industry: $industry, inflProductionCosts: $inflProductionCosts, lastFeeCalcUrl: $lastFeeCalcUrl, leadSource: $leadSource, mediaCost: $mediaCost, newRepeat: $newRepeat, office: $office, opportunityNumber: $opportunityNumber, opportunityOwner: $opportunityOwner, opportunityRecordType: $opportunityRecordType, originalLeadSource: $originalLeadSource, paidMediaFees: $paidMediaFees, parentAccount: $parentAccount, phase1End: $phase1End, phase1Name: $phase1Name, phase1Start: $phase1Start, phase2End: $phase2End, phase2Name: $phase2Name, phase2Start: $phase2Start, phase3End: $phase3End, phase3Name: $phase3Name, phase3Start: $phase3Start, phase4End: $phase4End, phase4Name: $phase4Name, phase4Start: $phase4Start, price: $price, probability: $probability, rateCardDiscount: $rateCardDiscount, rateCardId: $rateCardId, revenue: $revenue, sfAccount: $sfAccount, stage: $stage, startDate: $startDate, startWeek: $startWeek, title: $title, totalFees: $totalFees, ultimateParent: $ultimateParent, updatedAt: $updatedAt, valuePerWeekPhase1: $valuePerWeekPhase1, valuePerWeekPhase2: $valuePerWeekPhase2, valuePerWeekPhase3: $valuePerWeekPhase3, valuePerWeekPhase4: $valuePerWeekPhase4 })
+}
+
+mutation InsertRateCards($createdAt: Date!, $currency: String!, $hourlyRate: Float!, $id: UUID!, $name: String!, $roleId: UUID) @auth(level: PUBLIC) {
+  rateCards_insert(data: { createdAt: $createdAt, currency: $currency, hourlyRate: $hourlyRate, id: $id, name: $name, roleId: $roleId })
+}
+
+mutation InsertRoles($billableCapacityHours: Float!, $createdAt: Date!, $id: UUID!, $name: String!) @auth(level: PUBLIC) {
+  roles_insert(data: { billableCapacityHours: $billableCapacityHours, createdAt: $createdAt, id: $id, name: $name })
+}
+
+mutation InsertTimeEntries($createdAt: Date!, $date: Date!, $hours: Float!, $id: UUID!, $notes: String, $personId: UUID, $personName: String, $projectCode: String, $projectId: UUID, $projectName: String) @auth(level: PUBLIC) {
+  timeEntries_insert(data: { createdAt: $createdAt, date: $date, hours: $hours, id: $id, notes: $notes, personId: $personId, personName: $personName, projectCode: $projectCode, projectId: $projectId, projectName: $projectName })
+}
+
+mutation CreateAppUser($email: String!, $role: String!, $addedBy: String) @auth(level: PUBLIC) {
+  appUsers_insert(data: {
+    email: $email
+    role: $role
+    addedBy: $addedBy
+  })
+}
+
+mutation UpdateAppUser($id: UUID!, $role: String!) @auth(level: PUBLIC) {
+  appUsers_update(id: $id, data: {
+    role: $role
+  })
+}
+
+mutation DeleteAppUser($id: UUID!) @auth(level: PUBLIC) {
+  appUsers_delete(id: $id)
+}
+

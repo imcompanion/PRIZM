@@ -1,0 +1,1 @@
+ALTER TABLE public.rate_cards ADD COLUMN currency text NOT NULL DEFAULT 'GBP';

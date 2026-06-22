@@ -1,0 +1,1 @@
+UPDATE projects SET revenue = total_fees WHERE (revenue IS NULL OR revenue = 0) AND total_fees IS NOT NULL AND total_fees > 0;

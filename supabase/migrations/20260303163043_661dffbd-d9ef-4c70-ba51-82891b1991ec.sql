@@ -1,0 +1,5 @@
+ALTER TABLE public.projects 
+ADD COLUMN IF NOT EXISTS fee_calc_currency text DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS fx_lock_date date DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS fx_rate_gbp numeric DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS fx_rate_usd numeric DEFAULT NULL;

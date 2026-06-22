@@ -1,0 +1,1 @@
+ALTER TABLE public.projects ADD COLUMN last_fee_calc_url text DEFAULT NULL;

@@ -1,0 +1,214 @@
+type Allocations @table {
+  allocatedHours: Float!
+  createdAt: Date!
+  id: UUID! @default(expr: "uuidV4()")
+  personId: UUID
+  projectScopeId: UUID
+}
+
+type BillabilityRuleConditions @table {
+  createdAt: Date!
+  field: String!
+  id: UUID! @default(expr: "uuidV4()")
+  logicOperator: String!
+  operator: String!
+  ruleId: UUID!
+  value: String!
+}
+
+type BillabilityRules @table {
+  createdAt: Date!
+  id: UUID! @default(expr: "uuidV4()")
+  isBillable: Boolean!
+  logicOperator: String!
+  name: String!
+  priority: Float!
+}
+
+type ClientTeamAllocations @table {
+  clientName: String!
+  createdAt: Date!
+  id: UUID! @default(expr: "uuidV4()")
+  personId: UUID!
+  priority: Float!
+  roleId: UUID!
+}
+
+type DailyAllocations @table {
+  allocationId: UUID!
+  createdAt: Date!
+  date: Date!
+  hours: Float!
+  id: UUID! @default(expr: "uuidV4()")
+}
+
+type DataImports @table {
+  dataset: String!
+  id: UUID! @default(expr: "uuidV4()")
+  lastImportedAt: String!
+  rowCount: Float!
+}
+
+type People @table {
+  annualSalary: Float
+  code: String
+  createdAt: Date!
+  employmentEndDate: Date
+  employmentStartDate: Date
+  id: UUID! @default(expr: "uuidV4()")
+  imcPercentage: Float
+  monthlySalary: Float
+  name: String!
+  office: String!
+  overallEndDate: Date
+  overallStartDate: Date
+  roleId: UUID
+  status: String
+  team: String
+  type: String
+  ukPercentage: Float
+  usPercentage: Float
+}
+
+type PhaseAllocations @table {
+  allocationId: UUID
+  createdAt: Date!
+  hours: Float!
+  id: UUID! @default(expr: "uuidV4()")
+  phaseId: UUID!
+  projectScopeId: UUID
+}
+
+type ProjectMonthlyRevenue @table {
+  createdAt: Date!
+  id: UUID! @default(expr: "uuidV4()")
+  monthDate: Date!
+  projectId: UUID!
+  value: Float!
+}
+
+type ProjectPhases @table {
+  createdAt: Date!
+  endDate: Date
+  id: UUID! @default(expr: "uuidV4()")
+  phaseName: String!
+  projectId: UUID!
+  sortOrder: Float!
+  startDate: Date
+}
+
+type ProjectScopes @table {
+  createdAt: Date!
+  id: UUID! @default(expr: "uuidV4()")
+  phasePercentages: Any
+  projectId: UUID
+  roleId: UUID
+  scopedHours: Float!
+}
+
+type Projects @table {
+  actualCost: Float
+  bdbHours: Float
+  budgetCost: Float
+  closeDate: Date
+  contractedInflCost: Float
+  createdAt: Date!
+  createdDate: Date
+  dealValueDerisked: Float
+  durationWeeks: Float
+  durationWeeksRounded: Float
+  endDate: Date!
+  endWeek: String
+  extraData: Any
+  feeCalcCurrency: String
+  fxLockDate: Date
+  fxRateGbp: Float
+  fxRateUsd: Float
+  gpCheck: String
+  gpFullValue: Float
+  gpFullValuePerDay: Float
+  gpMarginPct: Float
+  grossBudget: Float
+  hardCosts: Float
+  hub: String
+  id: UUID! @default(expr: "uuidV4()")
+  industry: String
+  inflProductionCosts: Float
+  lastFeeCalcUrl: String
+  leadSource: String
+  mediaCost: Float
+  newRepeat: String
+  office: String
+  opportunityNumber: String
+  opportunityOwner: String
+  opportunityRecordType: String
+  originalLeadSource: String
+  paidMediaFees: Float
+  parentAccount: String
+  phase1End: String
+  phase1Name: String
+  phase1Start: String
+  phase2End: String
+  phase2Name: String
+  phase2Start: String
+  phase3End: String
+  phase3Name: String
+  phase3Start: String
+  phase4End: String
+  phase4Name: String
+  phase4Start: String
+  price: Float
+  probability: Float
+  rateCardDiscount: Float!
+  rateCardId: UUID
+  revenue: Float
+  sfAccount: String
+  stage: String
+  startDate: Date!
+  startWeek: String
+  title: String!
+  totalFees: Float
+  ultimateParent: String
+  updatedAt: Date!
+  valuePerWeekPhase1: Float
+  valuePerWeekPhase2: Float
+  valuePerWeekPhase3: Float
+  valuePerWeekPhase4: Float
+}
+
+type RateCards @table {
+  createdAt: Date!
+  currency: String!
+  hourlyRate: Float!
+  id: UUID! @default(expr: "uuidV4()")
+  name: String!
+  roleId: UUID
+}
+
+type Roles @table {
+  billableCapacityHours: Float!
+  createdAt: Date!
+  id: UUID! @default(expr: "uuidV4()")
+  name: String!
+}
+
+type TimeEntries @table {
+  createdAt: Date!
+  date: Date!
+  hours: Float!
+  id: UUID! @default(expr: "uuidV4()")
+  notes: String
+  personId: UUID
+  personName: String
+  projectCode: String
+  projectId: UUID
+  projectName: String
+}
+
+type AppUsers @table {
+  id: UUID! @default(expr: "uuidV4()")
+  email: String! @unique
+  role: String!
+  createdAt: Date! @default(expr: "request.time")
+  addedBy: String
+}

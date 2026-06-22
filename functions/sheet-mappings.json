@@ -1,0 +1,24 @@
+[
+  {
+    "spreadsheetId": "YOUR_FIRST_SHEET_ID_HERE",
+    "range": "London Office!A:K",
+    "columns": {
+      "date": 0,       
+      "hours": 1,      
+      "projectId": 3,  
+      "personId": 4,   
+      "notes": 10      
+    }
+  },
+  {
+    "spreadsheetId": "YOUR_SECOND_SHEET_ID_HERE",
+    "range": "Timesheets 2026!C:M",
+    "columns": {
+      "date": 2,       
+      "hours": 4,      
+      "projectId": 1,  
+      "personId": 0,   
+      "notes": 6       
+    }
+  }
+]

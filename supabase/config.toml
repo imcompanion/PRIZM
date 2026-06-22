@@ -1,0 +1,13 @@
+project_id = "iimykgvbxpwhklbaosbs"
+
+[functions.fetch-google-sheet]
+verify_jwt = false
+
+[functions.project-ai-summary]
+verify_jwt = false
+
+[functions.ask-analytics]
+verify_jwt = false
+
+[functions.generate-scope]
+verify_jwt = false
