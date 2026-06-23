@@ -6,15 +6,21 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runSync = runSync;
 const googleapis_1 = require("googleapis");
 const app_1 = require("firebase-admin/app");
-const dataconnect_generated_1 = require("./dataconnect-generated");
+const generated_server_1 = require("@dataconnect/generated-server");
 // Initialize the Firebase Admin SDK (used for default credentials if needed)
 (0, app_1.initializeApp)();
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 // Configuration
 // We load the heterogeneous mapping from the JSON file
-const mappingsPath = path_1.default.join(__dirname, '../../sheet-mappings.json');
-const sheetMappings = JSON.parse(fs_1.default.readFileSync(mappingsPath, 'utf-8'));
+let sheetMappings = [];
+try {
+    const mappingsPath = path_1.default.join(__dirname, '../sheet-mappings.json');
+    sheetMappings = JSON.parse(fs_1.default.readFileSync(mappingsPath, 'utf-8'));
+}
+catch (e) {
+    console.warn('Could not read sheet-mappings.json, continuing with empty array.');
+}
 const LOOKBACK_DAYS = 90;
 /**
  * Helper to convert Excel serial dates to standard Date objects if needed,
@@ -92,7 +98,7 @@ async function runSync() {
         await Promise.all(batch.map(async (record) => {
             try {
                 // We use the generated SDK to write to Data Connect
-                await (0, dataconnect_generated_1.insertTimeEntries)(record);
+                await (0, generated_server_1.insertTimeEntries)(record);
                 successCount++;
             }
             catch (error) {

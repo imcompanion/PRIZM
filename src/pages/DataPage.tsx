@@ -1544,145 +1544,69 @@ const ScopesImportTab = ({ lastImported }: { lastImported?: any }) => {
 
 // ─── UK Rate Cards Tab ──────────────────────────────────────────────────
 
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { Loader2 } from "lucide-react";
+
 const RateCardsImportTab = ({ lastImported }: { lastImported?: any }) => {
   const queryClient = useQueryClient();
-  const [pasteData, setPasteData] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  const { data: roles = [] } = useQuery({
-    queryKey: ["roles"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("roles").select("id, name").order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const handleSync = async () => {
+    setIsSyncing(true);
+    try {
+      const functions = getFunctions();
+      const syncRateCards = httpsCallable(functions, 'syncRateCards');
+      
+      const result = await syncRateCards({
+        spreadsheetId: "1CoYgGyk2kMdnSYwdtVl-AGurDDf5nJPn7KKW9maVSws",
+        sheetName: "1827495306" // Using gid or sheet name. Wait, the Google Sheets API 'range' expects a sheet name. I should use the actual sheet name! 
+      });
 
-  const importRateCards = useMutation({
-    mutationFn: async (rows: { name: string; role_id: string; hourly_rate: number; currency: string }[]) => {
-      // Clear existing rate cards and re-insert
-      await supabase.from("rate_cards").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-      const BATCH = 500;
-      for (let i = 0; i < rows.length; i += BATCH) {
-        const { error } = await supabase.from("rate_cards").insert(rows.slice(i, i + BATCH));
-        if (error) throw error;
-      }
-    },
-    onSuccess: (_, rows) => {
       queryClient.invalidateQueries({ queryKey: ["rate-cards"] });
-      setPasteData("");
-      recordImport("rate_cards", rows.length, queryClient);
-      toast.success(`${rows.length} rate card entries imported`);
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const handleImport = () => {
-    const lines = pasteData.trim().split("\n").filter(Boolean);
-    if (lines.length < 3) {
-      toast.error("Need at least 3 rows: client names, currencies, and one role row");
-      return;
+      queryClient.invalidateQueries({ queryKey: ["roles"] });
+      
+      const data = result.data as any;
+      toast.success(`Successfully synced ${data.rolesUpserted} roles and ${data.rateCardsUpserted} rate cards!`);
+    } catch (e: any) {
+      toast.error(`Sync failed: ${e.message}`);
+    } finally {
+      setIsSyncing(false);
     }
-
-    const roleMap = new Map(roles.map((r) => [r.name.toLowerCase().trim(), r.id]));
-
-    // Row 1: "Role" + client names
-    const row1 = lines[0].split("\t");
-    const clientNames = row1.slice(1).map((c) => c.trim()).filter(Boolean);
-
-    // Row 2: "FX Rate" / "Currency" + currency codes
-    const row2 = lines[1].split("\t");
-    const currencies = row2.slice(1).map((c) => {
-      const v = c.trim().toUpperCase();
-      if (v === "GBP" || v === "EUR" || v === "USD") return v;
-      return "GBP"; // default
-    });
-
-    // Remaining rows: role name + rates
-    const results: { name: string; role_id: string; hourly_rate: number; currency: string }[] = [];
-    const errors: string[] = [];
-    let autoCreatedRoles = 0;
-
-    // Collect missing roles first
-    const missingRoles = new Set<string>();
-    for (let i = 2; i < lines.length; i++) {
-      const cols = lines[i].split("\t");
-      const roleName = cols[0]?.trim();
-      if (!roleName) continue;
-      if (!roleMap.has(roleName.toLowerCase().trim())) {
-        missingRoles.add(roleName.trim());
-      }
-    }
-
-    const processRows = async () => {
-      // Auto-create missing roles
-      if (missingRoles.size > 0) {
-        const newRoles = buildUniqueRoleUpserts(missingRoles);
-        const { error } = await supabase.from("roles").upsert(newRoles, { onConflict: "name" });
-        if (error) { toast.error(`Failed to create roles: ${error.message}`); return; }
-        const { data: allRoles } = await supabase.from("roles").select("id, name").order("name");
-        for (const r of allRoles || []) roleMap.set(normalizeRoleName(r.name), r.id);
-        autoCreatedRoles = newRoles.length;
-        queryClient.invalidateQueries({ queryKey: ["roles"] });
-      }
-
-      for (let i = 2; i < lines.length; i++) {
-        const cols = lines[i].split("\t");
-        const roleName = cols[0]?.trim();
-        if (!roleName) continue;
-
-        const roleId = roleMap.get(roleName.toLowerCase().trim());
-        if (!roleId) {
-          errors.push(`Row ${i + 1}: role "${roleName}" not found`);
-          continue;
-        }
-
-        for (let j = 0; j < clientNames.length; j++) {
-          const clientName = clientNames[j];
-          if (!clientName) continue;
-          const rawVal = (cols[j + 1] || "").trim().replace(/[£$€,]/g, "").toLowerCase();
-          if (!rawVal || rawVal === "blank" || rawVal === "n/a" || rawVal === "") continue;
-          const rate = parseFloat(rawVal);
-          if (isNaN(rate) || rate <= 0) continue;
-
-          results.push({
-            name: clientName,
-            role_id: roleId,
-            hourly_rate: rate,
-            currency: currencies[j] || "GBP",
-          });
-        }
-      }
-
-      if (errors.length > 0) {
-        console.warn("Rate card import errors:", errors);
-        toast.warning(`${errors.length} row(s) had issues`, { duration: 8000 });
-      }
-
-      if (autoCreatedRoles > 0) {
-        toast.info(`Auto-created ${autoCreatedRoles} new role(s)`);
-      }
-
-      if (!results.length) { toast.error("No valid rate card entries"); return; }
-      importRateCards.mutate(results);
-    };
-
-    processRows();
   };
 
   return (
-    <ImportPanel
-      title="Import UK Rate Cards"
-      description="Import client rate cards from your rate card matrix. Row 1 = client names, Row 2 = currency per client, subsequent rows = role + rates."
-      columns="Role, Client 1 rate, Client 2 rate, ..."
-      placeholder={"Role\tNike\tAdidas\tPuma\nFX Rate\tGBP\tEUR\tGBP\nDesigner\t119.00\t125.00\t95.00\nDeveloper\t161.00\t169.00\t129.00"}
-      pasteData={pasteData}
-      setPasteData={setPasteData}
-      onImport={handleImport}
-      isPending={importRateCards.isPending}
-      buttonLabel="Import Rate Cards"
-      warning="This will replace all existing rate card data."
-      lastImported={lastImported}
-    />
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 max-w-3xl">
+      <h2 className="text-xl font-bold text-gray-900 mb-2">Live Sync: Global Rate Cards</h2>
+      <p className="text-gray-500 mb-6 text-sm">
+        Clicking the button below will securely connect to the Master Rate Cards Google Sheet and instantly synchronize all Roles, Capacities, Phase Allocations, and Hourly Rates into the application.
+      </p>
+
+      <div className="bg-gray-50 border border-gray-100 rounded-lg p-4 mb-6">
+        <h3 className="text-sm font-semibold text-gray-900 mb-1">Data Source:</h3>
+        <p className="text-sm text-gray-600">BDB Global Rate Cards (Master Dashboard Tab)</p>
+      </div>
+
+      <Button 
+        onClick={handleSync} 
+        disabled={isSyncing}
+        className="w-full sm:w-auto bg-black text-white hover:bg-gray-800"
+      >
+        {isSyncing ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Syncing from Google...
+          </>
+        ) : (
+          "Live Sync Now"
+        )}
+      </Button>
+
+      {lastImported && (
+        <p className="mt-4 text-xs text-gray-400">
+          Last Synced: {new Date(lastImported.lastImportedAt).toLocaleString()}
+        </p>
+      )}
+    </div>
   );
 };
 

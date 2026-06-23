@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
 import { initializeApp } from 'firebase-admin/app';
-import { insertTimeEntries } from './dataconnect-generated';
+import { insertTimeEntries } from '@dataconnect/generated-server';
 
 // Initialize the Firebase Admin SDK (used for default credentials if needed)
 initializeApp();
@@ -10,8 +10,13 @@ import path from 'path';
 
 // Configuration
 // We load the heterogeneous mapping from the JSON file
-const mappingsPath = path.join(__dirname, '../../sheet-mappings.json');
-const sheetMappings = JSON.parse(fs.readFileSync(mappingsPath, 'utf-8'));
+let sheetMappings: any[] = [];
+try {
+  const mappingsPath = path.join(__dirname, '../sheet-mappings.json');
+  sheetMappings = JSON.parse(fs.readFileSync(mappingsPath, 'utf-8'));
+} catch (e) {
+  console.warn('Could not read sheet-mappings.json, continuing with empty array.');
+}
 const LOOKBACK_DAYS = 90;
 
 /**

@@ -1,8 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.autonomousSheetSync = void 0;
+exports.syncRateCards = exports.autonomousSheetSync = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const syncSheets_1 = require("./syncSheets");
+const syncRateCards_1 = require("./syncRateCards");
+const https_1 = require("firebase-functions/v2/https");
 /**
  * Scheduled Cloud Function that runs the Google Sheets Sync every 24 hours.
  *
@@ -22,6 +24,27 @@ exports.autonomousSheetSync = (0, scheduler_1.onSchedule)({
     }
     catch (error) {
         console.error("Cron job failed:", error);
+    }
+});
+exports.syncRateCards = (0, https_1.onCall)({
+    timeoutSeconds: 540,
+    memory: "1GiB",
+    region: "us-east4" // Must match your Data Connect region for lowest latency
+}, async (request) => {
+    // Basic auth check
+    if (!request.auth) {
+        throw new Error("You must be logged in to sync rate cards.");
+    }
+    try {
+        const { spreadsheetId, sheetName } = request.data;
+        if (!spreadsheetId || !sheetName) {
+            throw new Error("spreadsheetId and sheetName are required.");
+        }
+        return await (0, syncRateCards_1.runRateCardSync)(spreadsheetId, sheetName);
+    }
+    catch (error) {
+        console.error("syncRateCards failed:", error);
+        throw new Error(error.message);
     }
 });
 //# sourceMappingURL=index.js.map
