@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { getAuth, onAuthStateChanged, User, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOut } from "firebase/auth";
-import { getAppUserByEmail } from "@/dataconnect-generated";
+import { supabase } from "@/integrations/supabase/client";
 
 interface AppUser {
   id: string;
@@ -11,7 +10,7 @@ interface AppUser {
 }
 
 interface AuthContextType {
-  user: User | null;
+  user: any | null;
   appUser: AppUser | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
@@ -29,19 +28,21 @@ const AuthContext = createContext<AuthContextType>({
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const auth = getAuth();
-  const googleProvider = new GoogleAuthProvider();
-
-  // We should restrict sign-in to the specific domain if needed, but since it's allowed emails, checking the DB is enough.
-  // googleProvider.setCustomParameters({ hd: "billiondollarboy.com" }); // Optional: restricts picker
-
   const signInWithGoogle = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
+      await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          }
+        }
+      });
     } catch (error) {
       console.error("Error signing in with Google", error);
       throw error;
@@ -49,34 +50,56 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
-    await firebaseSignOut(auth);
+    await supabase.auth.signOut();
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      
-      if (firebaseUser && firebaseUser.email) {
-        try {
-          const res = await getAppUserByEmail({ email: firebaseUser.email });
-          if (res.data.appUserss && res.data.appUserss.length > 0) {
-            setAppUser(res.data.appUserss[0]);
-          } else {
-            setAppUser(null);
-          }
-        } catch (err) {
-          console.error("Error fetching app user permissions", err);
-          setAppUser(null);
-        }
-      } else {
-        setAppUser(null);
-      }
-      
-      setLoading(false);
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      checkAppUser(currentUser);
     });
 
-    return () => unsubscribe();
-  }, [auth]);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+        checkAppUser(currentUser);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const checkAppUser = async (currentUser: any) => {
+    if (currentUser && currentUser.email) {
+      try {
+        const { data, error } = await supabase
+          .from("app_users")
+          .select("*")
+          .eq("email", currentUser.email);
+        
+        if (!error && data && data.length > 0) {
+          setAppUser({
+            id: data[0].id,
+            email: data[0].email,
+            role: data[0].role,
+            createdAt: data[0].created_at,
+            addedBy: data[0].added_by
+          });
+        } else {
+          setAppUser(null);
+        }
+      } catch (err) {
+        console.error("Error fetching app user permissions", err);
+        setAppUser(null);
+      }
+    } else {
+      setAppUser(null);
+    }
+    setLoading(false);
+  };
 
   return (
     <AuthContext.Provider value={{ user, appUser, loading, signInWithGoogle, signOut }}>

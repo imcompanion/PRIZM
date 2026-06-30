@@ -1,35 +1,14 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onRequest } from "firebase-functions/v2/https";
+import { onRequest, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { google } from "googleapis";
 import { v5 as uuidv5 } from "uuid";
+import { createClient } from "@supabase/supabase-js";
 import { initializeApp, getApps } from "firebase-admin/app";
-import { initializeApp as initClientApp, getApps as getClientApps } from "firebase/app";
-
-// Data Connect SDK
-import {
-  upsertPeople,
-  upsertProjects,
-  upsertProjectScopes,
-  upsertRoles,
-  upsertRateCards,
-  listPeople,
-  getAllTimeEntries,
-  updateTimeEntryPerson,
-  deletePeople,
-} from "./dataconnect-generated";
 
 // Ensure Apps are initialized
 if (!getApps().length) {
   initializeApp();
-}
-
-if (!getClientApps().length) {
-  const firebaseConfig = {
-    projectId: "pharaoh-54a0e",
-    // We only need projectId for DataConnect in functions if running in GCP with default creds
-  };
-  initClientApp(firebaseConfig);
 }
 
 // Fixed namespace for deterministic UUID generation
@@ -37,6 +16,21 @@ const NAMESPACE = "1b671a64-40d5-491e-99b0-da01ff1f3341";
 
 // Centralized Sheet ID
 const SHEET_ID = "1kHXAbVe-EAD-l63C7o4c1bJcvL0ECEyylXrspV8fJCQ";
+
+let _supabase: any = null;
+function getSupabase(): any {
+  if (!_supabase) {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.");
+    }
+    _supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false },
+    });
+  }
+  return _supabase;
+}
 
 // Helper to convert Excel serial dates or "dd/mm/yyyy" to YYYY-MM-DD
 function parseDate(value: any): string | null {
@@ -71,6 +65,7 @@ function parseNumber(value: any): number | null {
 
 export async function runSync() {
   logger.info("Starting centralized sheet sync");
+  const supabase = getSupabase();
 
   const auth = new google.auth.GoogleAuth({
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
@@ -96,6 +91,7 @@ export async function runSync() {
   const roleIdMap = new Map<string, string>(); // name -> id
 
   // Process Roles
+  const rolesBatchMap = new Map<string, any>();
   let upsertedRoles = 0;
   for (const row of rolesRows) {
     const name = row[0];
@@ -108,20 +104,26 @@ export async function runSync() {
     const cap = parseFloat(capStr);
     const capacityHours = isNaN(cap) ? 37.5 : (cap / 100) * 37.5;
 
-    await upsertRoles({
+    rolesBatchMap.set(roleId, {
       id: roleId,
       name,
-      billableCapacityHours: capacityHours,
-      createdAt: new Date().toISOString(),
-      isActive: true,
+      billable_capacity_hours: capacityHours,
+      created_at: new Date().toISOString(),
     });
     upsertedRoles++;
+  }
+  
+  const rolesBatch = Array.from(rolesBatchMap.values());
+  if (rolesBatch.length > 0) {
+    const { error } = await supabase.from("roles" as any).upsert(rolesBatch);
+    if (error) throw new Error(`Roles Upsert Error: ${error.message}`);
   }
 
   // Process Rate Cards
   const clientNames = rateCardsRows[0] || [];
   const currencies = rateCardsRows[1] || [];
   let upsertedRateCards = 0;
+  const rateCardsBatchMap = new Map<string, any>();
 
   for (let i = 3; i < rateCardsRows.length; i++) {
     const row = rateCardsRows[i];
@@ -140,16 +142,23 @@ export async function runSync() {
 
       const rateCardId = uuidv5(`ratecard_${clientName}_${roleName}`, NAMESPACE);
       
-      await upsertRateCards({
+      rateCardsBatchMap.set(rateCardId, {
         id: rateCardId,
         name: clientName,
         currency,
-        hourlyRate: rateVal,
-        roleId: roleId || null,
-        createdAt: new Date().toISOString(),
-        isActive: true,
+        hourly_rate: rateVal,
+        role_id: roleId || null,
+        created_at: new Date().toISOString(),
       });
       upsertedRateCards++;
+    }
+  }
+
+  const rateCardsBatch = Array.from(rateCardsBatchMap.values());
+  if (rateCardsBatch.length > 0) {
+    for (let i = 0; i < rateCardsBatch.length; i += 500) {
+      const { error } = await supabase.from("rate_cards" as any).upsert(rateCardsBatch.slice(i, i + 500));
+      if (error) throw new Error(`RateCards Upsert Error: ${error.message}`);
     }
   }
 
@@ -164,6 +173,7 @@ export async function runSync() {
 
   const sheetPersonIds = new Set<string>();
   const nameToCurrentId = new Map<string, string>();
+  const peopleBatchMap = new Map<string, any>();
 
   for (const row of peopleRows) {
     const name = row[0];
@@ -187,7 +197,7 @@ export async function runSync() {
     const personId = uuidv5(personKey, NAMESPACE);
     const roleId = roleName ? roleIdMap.get(roleName.toLowerCase()) : null;
 
-    await upsertPeople({
+    peopleBatchMap.set(personId, {
       id: personId,
       name,
       code,
@@ -195,21 +205,19 @@ export async function runSync() {
       team,
       status,
       office: office || "Unknown",
-      ukPercentage: ukPct,
-      usPercentage: usPct,
-      imcPercentage: imcPct,
-      employmentStartDate: startDate,
-      employmentEndDate: endDate,
-      overallStartDate: overallStart,
-      overallEndDate: overallEnd,
-      monthlySalary: monthlySalary,
-      annualSalary: monthlySalary !== null ? monthlySalary * 12 : null,
-      roleId: roleId || null,
-      createdAt: new Date().toISOString(),
-      isActive: true,
+      uk_percentage: ukPct,
+      us_percentage: usPct,
+      imc_percentage: imcPct,
+      employment_start_date: startDate,
+      employment_end_date: endDate,
+      overall_start_date: overallStart,
+      overall_end_date: overallEnd,
+      monthly_salary: monthlySalary,
+      annual_salary: monthlySalary !== null ? monthlySalary * 12 : null,
+      role_id: roleId || null,
+      created_at: new Date().toISOString(),
     });
     upsertedPeople++;
-
     sheetPersonIds.add(personId);
 
     // Map normalized name to the current active/latest contract ID in the sheet
@@ -218,21 +226,30 @@ export async function runSync() {
     if (!prevId) {
       nameToCurrentId.set(normName, personId);
     } else {
-      // Prefer ongoing contract (no end date) or later end date
       if (!endDate) {
         nameToCurrentId.set(normName, personId);
       }
     }
   }
 
+  const peopleBatch = Array.from(peopleBatchMap.values());
+  if (peopleBatch.length > 0) {
+    for (let i = 0; i < peopleBatch.length; i += 500) {
+      const { error } = await supabase.from("people" as any).upsert(peopleBatch.slice(i, i + 500));
+      if (error) throw new Error(`People Upsert Error: ${error.message}`);
+    }
+  }
+
   // Perform stale records cleanup & relinking
   logger.info("Performing people cleanup and time entry relinking...");
   try {
-    const existingPeopleRes = await listPeople();
-    const existingPeople = existingPeopleRes.data.peoples || [];
+    const existingPeopleRes = await supabase.from("people" as any).select("*");
+    const existingPeople = existingPeopleRes.data || [];
 
-    const timeEntriesRes = await getAllTimeEntries();
-    const allTimeEntries = timeEntriesRes.data.timeEntriess || [];
+    const timeEntriesRes = await supabase.from("time_entries" as any).select("*");
+    const allTimeEntries = timeEntriesRes.data || [];
+    
+    const deactivationsMap = new Map<string, any>();
 
     for (const p of existingPeople) {
       if (!sheetPersonIds.has(p.id)) {
@@ -240,20 +257,16 @@ export async function runSync() {
         const targetCurrentId = nameToCurrentId.get(normName);
 
         if (targetCurrentId) {
-          // Relink any time entries to the new ID
-          const staleEntries = allTimeEntries.filter(e => e.person_id === p.id);
+          const staleEntries = allTimeEntries.filter((e: any) => e.person_id === p.id);
           if (staleEntries.length > 0) {
-            logger.info(`Relinking ${staleEntries.length} time entries from stale ID ${p.id} (${p.name}) to new ID ${targetCurrentId}`);
+            logger.info(`Relinking ${staleEntries.length} time entries from stale ID ${p.id} to new ID ${targetCurrentId}`);
             for (const entry of staleEntries) {
-              await updateTimeEntryPerson({ id: entry.id, personId: targetCurrentId });
+              await supabase.from("time_entries" as any).update({ person_id: targetCurrentId }).eq("id", entry.id);
             }
           }
-          logger.info(`Deleting stale person record ${p.id} (${p.name}, code: ${p.code})`);
-          await deletePeople({ id: p.id });
+          await supabase.from("people" as any).delete().eq("id", p.id);
         } else {
-          // No replacement found in the sheet (person removed entirely). Mark them as inactive.
-          logger.info(`Deactivating obsolete person record ${p.id} (${p.name}, code: ${p.code})`);
-          await upsertPeople({
+          deactivationsMap.set(p.id, {
             id: p.id,
             name: p.name,
             code: p.code,
@@ -261,20 +274,26 @@ export async function runSync() {
             team: p.team || null,
             status: p.status || null,
             office: p.office || "Unknown",
-            ukPercentage: p.uk_percentage || null,
-            usPercentage: p.us_percentage || null,
-            imcPercentage: p.imc_percentage || null,
-            employmentStartDate: p.employment_start_date || null,
-            employmentEndDate: p.employment_end_date || null,
-            overallStartDate: p.overall_start_date || null,
-            overallEndDate: p.overall_end_date || null,
-            monthlySalary: p.monthly_salary || null,
-            annualSalary: p.annual_salary || null,
-            roleId: p.role_id || null,
-            createdAt: p.created_at || new Date().toISOString(),
-            isActive: false,
+            uk_percentage: p.uk_percentage || null,
+            us_percentage: p.us_percentage || null,
+            imc_percentage: p.imc_percentage || null,
+            employment_start_date: p.employment_start_date || null,
+            employment_end_date: p.employment_end_date || null,
+            overall_start_date: p.overall_start_date || null,
+            overall_end_date: p.overall_end_date || null,
+            monthly_salary: p.monthly_salary || null,
+            annual_salary: p.annual_salary || null,
+            role_id: p.role_id || null,
+            created_at: p.created_at || new Date().toISOString(),
           });
         }
+      }
+    }
+    
+    const deactivations = Array.from(deactivationsMap.values());
+    if (deactivations.length > 0) {
+      for (let i = 0; i < deactivations.length; i += 500) {
+        await supabase.from("people" as any).upsert(deactivations.slice(i, i + 500));
       }
     }
   } catch (err: any) {
@@ -310,6 +329,7 @@ export async function runSync() {
   });
   const projectsRows = projectsResponse.data.values || [];
   let upsertedProjects = 0;
+  const projectsBatchMap = new Map<string, any>();
 
   const projectMap = new Map<string, string>(); // oppName -> id
 
@@ -333,41 +353,47 @@ export async function runSync() {
       ? "Agency - RFP / RFI"
       : "Agency - Execution";
 
-    await upsertProjects({
+    projectsBatchMap.set(projectId, {
       id: projectId,
       title,
-      sfAccount: row[1] || "",
-      parentAccount: row[2] || "",
-      ultimateParent: row[3] || "",
+      sf_account: row[1] || "",
+      parent_account: row[2] || "",
+      ultimate_parent: row[3] || "",
       office: row[4] || "",
-      newRepeat: row[5] || "",
+      new_repeat: row[5] || "",
       stage: row[6] || "",
-      createdDate,
-      closeDate,
-      startDate,
-      endDate,
-      price,
-      budgetCost: parseNumber(row[12]),
-      contractedInflCost: parseNumber(row[13]),
-      actualCost: parseNumber(row[14]),
-      mediaCost: parseNumber(row[15]),
-      gpFullValue: parseNumber(row[16]),
-      gpCheck: row[17] || "",
-      gpFullValuePerDay: parseNumber(row[18]),
+      created_date: createdDate,
+      close_date: closeDate,
+      start_date: startDate,
+      end_date: endDate,
       probability: parseNumber(row[19]),
-      startWeek: row[20] || "",
-      endWeek: row[21] || "",
-      durationWeeks: parseNumber(row[22]),
-      durationWeeksRounded: parseNumber(row[23]),
-      rateCardDiscount: 0,
-      opportunityNumber: oppNumber,
-      opportunityRecordType: oppRecordType,
+      start_week: row[20] || "",
+      end_week: row[21] || "",
+      duration_weeks: parseNumber(row[22]),
+      duration_weeks_rounded: parseNumber(row[23]),
+      rate_card_discount: 0,
+      opportunity_number: oppNumber,
+      opportunity_record_type: oppRecordType,
       revenue: price,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      isActive: true,
+      budget_cost: parseNumber(row[12]),
+      contracted_infl_cost: parseNumber(row[13]),
+      actual_cost: parseNumber(row[14]),
+      media_cost: parseNumber(row[15]),
+      gp_full_value: parseNumber(row[16]),
+      gp_check: row[17] || "",
+      gp_full_value_per_day: parseNumber(row[18]),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
     upsertedProjects++;
+  }
+
+  const projectsBatch = Array.from(projectsBatchMap.values());
+  if (projectsBatch.length > 0) {
+    for (let i = 0; i < projectsBatch.length; i += 500) {
+      const { error } = await supabase.from("projects" as any).upsert(projectsBatch.slice(i, i + 500));
+      if (error) throw new Error(`Projects Upsert Error: ${error.message}`);
+    }
   }
 
   // 4. SCOPES & ALLOCATIONS
@@ -378,6 +404,7 @@ export async function runSync() {
   });
   const scopesRows = scopesResponse.data.values || [];
   let upsertedScopes = 0;
+  const scopesBatchMap = new Map<string, any>();
 
   for (const row of scopesRows) {
     const oppName = row[2];
@@ -402,16 +429,23 @@ export async function runSync() {
       }
     }
 
-    await upsertProjectScopes({
+    scopesBatchMap.set(scopeId, {
       id: scopeId,
-      projectId,
-      roleId: roleId || null,
-      scopedHours,
-      phasePercentages: JSON.stringify(phasePercentages),
-      createdAt: new Date().toISOString(),
-      isActive: true,
+      project_id: projectId,
+      role_id: roleId || null,
+      scoped_hours: scopedHours,
+      phase_percentages: phasePercentages,
+      created_at: new Date().toISOString(),
     });
     upsertedScopes++;
+  }
+  
+  const scopesBatch = Array.from(scopesBatchMap.values());
+  if (scopesBatch.length > 0) {
+    for (let i = 0; i < scopesBatch.length; i += 500) {
+      const { error } = await supabase.from("project_scopes" as any).upsert(scopesBatch.slice(i, i + 500));
+      if (error) throw new Error(`Project Scopes Upsert Error: ${error.message}`);
+    }
   }
 
   logger.info(`Sync complete! Roles: ${upsertedRoles}, RateCards: ${upsertedRateCards}, People: ${upsertedPeople}, Projects: ${upsertedProjects}, Scopes: ${upsertedScopes}`);
@@ -431,7 +465,6 @@ export const syncCentralDataHttp = onRequest({ region: "us-east4", serviceAccoun
   }
 });
 
-import { onCall } from "firebase-functions/v2/https";
 export const syncCentralDataCallable = onCall({ region: "us-east4", timeoutSeconds: 500, memory: "1GiB" }, async (request) => {
   try {
     await runSync();

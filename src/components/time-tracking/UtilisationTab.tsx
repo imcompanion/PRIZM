@@ -251,7 +251,11 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
       if (effectiveStart > effectiveEnd) continue;
 
       const role = (person as any).roles;
-      const billableCapacityHrs = role?.billable_capacity_hours ?? HOURS_PER_DAY;
+      // billable_capacity_hours in the DB is a weekly figure (e.g. 30 hours = 75% of a 40h week).
+      // We must divide by 5 to get the daily expected billable hours.
+      const billableCapacityHrs = role?.billable_capacity_hours != null 
+        ? role.billable_capacity_hours / 5 
+        : HOURS_PER_DAY;
 
       const normName = person.name.trim().toLowerCase();
       const dedupKey = `${normName}::${person.team || "Unassigned"}`;

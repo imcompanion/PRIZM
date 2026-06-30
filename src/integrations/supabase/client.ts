@@ -1,2 +1,6 @@
-// This file routes all Supabase queries to the new Firebase Data Connect adapter
-export { supabase } from "./adapter";
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);

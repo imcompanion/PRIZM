@@ -107,10 +107,6 @@ export const resumeGlobalImportIfNeeded = async (queryClient: any) => {
   }
 
   console.log(`Resuming timesheets import from index ${currentIndex} of ${entries.length}...`);
-  
-  const { 
-    insertTimeEntries 
-  } = await import("@/dataconnect-generated");
 
   updateGlobalImportState(true, { current: currentIndex, total: entries.length });
 
@@ -121,20 +117,20 @@ export const resumeGlobalImportIfNeeded = async (queryClient: any) => {
       for (let i = currentIndex; i < entries.length; i += CONCURRENCY_LIMIT) {
         const batch = entries.slice(i, i + CONCURRENCY_LIMIT);
         
-        await Promise.all(batch.map(async (entry) => {
-           return insertTimeEntries({
-             createdAt: format(new Date(), 'yyyy-MM-dd'),
-             date: entry.date,
-             hours: entry.hours,
-             id: crypto.randomUUID(),
-             notes: entry.notes,
-             personId: entry.person_id,
-             personName: entry.fallback_person_name,
-             projectCode: entry.fallback_opportunity_number,
-             projectId: entry.project_id,
-             projectName: entry.fallback_project_name
-           });
-        }));
+        const { error } = await supabase.from('time_entries').insert(
+          batch.map(entry => ({
+            id: crypto.randomUUID(),
+            date: entry.date,
+            hours: entry.hours,
+            notes: entry.notes,
+            person_id: entry.person_id,
+            person_name: entry.fallback_person_name,
+            project_id: entry.project_id,
+            project_code: entry.fallback_opportunity_number,
+            project_name: entry.fallback_project_name
+          }))
+        );
+        if (error) throw error;
         
         const nextIndex = Math.min(i + CONCURRENCY_LIMIT, entries.length);
         updateGlobalImportState(true, { current: nextIndex, total: entries.length });
@@ -199,14 +195,11 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
   const { data: timeframe, isLoading: isLoadingTimeframe } = useQuery({
     queryKey: ["timesheets_timeframe"],
     queryFn: async () => {
-      const { getOldestTimeEntry, getNewestTimeEntry } = await import("@/dataconnect-generated");
-      const [minRes, maxRes] = await Promise.all([
-        getOldestTimeEntry(),
-        getNewestTimeEntry()
-      ]);
+      const { data: minRes } = await supabase.from('time_entries').select('date').order('date', { ascending: true }).limit(1);
+      const { data: maxRes } = await supabase.from('time_entries').select('date').order('date', { ascending: false }).limit(1);
       
-      const minDate = minRes.data.timeEntriess?.[0]?.date;
-      const maxDate = maxRes.data.timeEntriess?.[0]?.date;
+      const minDate = minRes?.[0]?.date;
+      const maxDate = maxRes?.[0]?.date;
       
       return { minDate, maxDate };
     }
@@ -233,21 +226,17 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
 
   const importEntries = useMutation({
     mutationFn: async ({ entries, fromDate }: { entries: any[]; fromDate: string | null }) => {
-      // Data connect requires importing the actual generated mutations
-      const { 
-        deleteTimeEntriesByDate,
-        deleteAllTimeEntries,
-        insertTimeEntries 
-      } = await import("@/dataconnect-generated");
-
       updateGlobalImportState(true, { current: 0, total: entries.length });
       await saveImportQueue(entries, fromDate, 0);
 
       try {
         if (fromDate) {
-          await deleteTimeEntriesByDate({ fromDate });
+          const { error } = await supabase.from('time_entries').delete().gte('date', fromDate);
+          if (error) throw error;
         } else {
-          await deleteAllTimeEntries();
+          // Instead of deleting all one by one, use a raw SQL RPC or a not.is.null filter to delete all
+          const { error } = await supabase.from('time_entries').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          if (error) throw error;
         }
 
         // To prevent RESOURCE_EXHAUSTED connection pool limits on Data Connect,
@@ -257,20 +246,20 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
         for (let i = 0; i < entries.length; i += CONCURRENCY_LIMIT) {
           const batch = entries.slice(i, i + CONCURRENCY_LIMIT);
           
-          await Promise.all(batch.map(async (entry) => {
-             return insertTimeEntries({
-               createdAt: format(new Date(), 'yyyy-MM-dd'),
-               date: entry.date,
-               hours: entry.hours,
-               id: crypto.randomUUID(),
-               notes: entry.notes,
-               personId: entry.person_id,
-               personName: entry.fallback_person_name,
-               projectCode: entry.fallback_opportunity_number,
-               projectId: entry.project_id,
-               projectName: entry.fallback_project_name
-             });
-          }));
+          const { error } = await supabase.from('time_entries').insert(
+            batch.map(entry => ({
+              id: crypto.randomUUID(),
+              date: entry.date,
+              hours: entry.hours,
+              notes: entry.notes,
+              person_id: entry.person_id,
+              person_name: entry.fallback_person_name,
+              project_id: entry.project_id,
+              project_code: entry.fallback_opportunity_number,
+              project_name: entry.fallback_project_name
+            }))
+          );
+          if (error) throw error;
           
           const nextIndex = Math.min(i + CONCURRENCY_LIMIT, entries.length);
           updateGlobalImportState(true, { current: nextIndex, total: entries.length });
@@ -337,8 +326,22 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
       return;
     }
 
-    const { data: allProjects } = await supabase.from("projects").select("id, opportunity_number, title");
-    const { data: allPeople } = await supabase.from("people").select("id, name, code, role_id, employment_start_date");
+    const fetchAllData = async (table: string, columns: string) => {
+      let all = [];
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data, error } = await supabase.from(table).select(columns).range(from, from + step - 1);
+        if (error) throw error;
+        all.push(...(data || []));
+        if (!data || data.length < step) break;
+        from += step;
+      }
+      return all;
+    };
+
+    const allProjects = await fetchAllData("projects", "id, opportunity_number, title");
+    const allPeople = await fetchAllData("people", "id, name, code, role_id, employment_start_date");
 
     const projectMapByCode = new Map((allProjects || []).filter(p => p.opportunity_number).map(p => [p.opportunity_number!.toLowerCase().trim().replace(/^0+/, ""), p.id]));
     const projectMapByName = new Map((allProjects || []).filter(p => p.title).map(p => [p.title.toLowerCase().trim(), p.id]));

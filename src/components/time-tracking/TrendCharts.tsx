@@ -188,7 +188,9 @@ const TrendCharts = ({ startDate, endDate, officeFilter, showFormer }: TrendChar
         const leaveIntervals = parentalLeaveMap.get(normName);
         const workingDays = getWorkingDaysExcludingLeave(effectiveStart, effectiveEnd, leaveIntervals);
         const role = (person as any).roles;
-        const billableCapacity = role?.billable_capacity_hours ?? HOURS_PER_DAY;
+        const billableCapacity = role?.billable_capacity_hours != null 
+          ? role.billable_capacity_hours / 5 
+          : HOURS_PER_DAY;
         const expected = workingDays * HOURS_PER_DAY;
         totalExpected += expected;
         totalExpectedBillable += workingDays * billableCapacity;

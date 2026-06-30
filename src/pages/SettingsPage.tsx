@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { listAppUsers, createAppUser, deleteAppUser } from "@/dataconnect-generated";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,6 +45,10 @@ const DataSyncTab = () => {
       queryClient.invalidateQueries({ queryKey: ["people"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["project_scopes"] });
+      queryClient.invalidateQueries({ queryKey: ["project_ids_set_v2"] });
+      queryClient.invalidateQueries({ queryKey: ["projects_for_billability_v3"] });
+      queryClient.invalidateQueries({ queryKey: ["utilisation_summary"] });
+      queryClient.invalidateQueries({ queryKey: ["utilisation_summary_monthly"] });
       
       // Update our central_sync timestamp
       await supabase.from("data_imports" as any).upsert(
@@ -126,8 +129,15 @@ export default function SettingsPage() {
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const res = await listAppUsers();
-      setUsers(res.data.appUserss || []);
+      const { data, error } = await supabase.from("app_users").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      setUsers(data?.map(u => ({
+        id: u.id,
+        email: u.email,
+        role: u.role,
+        createdAt: u.created_at,
+        addedBy: u.added_by
+      })) || []);
     } catch (error) {
       console.error("Failed to fetch users", error);
       toast.error("Failed to load users list.");
@@ -144,18 +154,19 @@ export default function SettingsPage() {
 
     try {
       setAdding(true);
-      await createAppUser({
+      const { error } = await supabase.from("app_users").insert([{
         email: newEmail.toLowerCase(),
         role: newRole,
-        addedBy: appUser?.email || "unknown",
-      });
+        added_by: appUser?.email || "unknown",
+      }]);
+      if (error) throw error;
       toast.success("User added successfully.");
       setNewEmail("");
       setNewRole("user");
       fetchUsers();
     } catch (error: any) {
       console.error("Failed to add user", error);
-      if (error.message && error.message.includes("already exists")) {
+      if (error.message && error.message.includes("duplicate key")) {
         toast.error("User already exists.");
       } else {
         toast.error("Failed to add user.");
@@ -174,7 +185,8 @@ export default function SettingsPage() {
     if (!confirm(`Are you sure you want to remove ${email}?`)) return;
 
     try {
-      await deleteAppUser({ id });
+      const { error } = await supabase.from("app_users").delete().eq("id", id);
+      if (error) throw error;
       toast.success("User removed successfully.");
       fetchUsers();
     } catch (error) {
