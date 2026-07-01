@@ -31,18 +31,18 @@ const getDB = (): Promise<IDBDatabase> => {
   });
 };
 
-export const saveImportQueue = async (entries: any[], fromDate: string | null, currentIndex: number) => {
+export const saveImportQueue = async (entries: any[], fromDate: string | null, toDate: string | null, currentIndex: number) => {
   try {
     const db = await getDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    store.put({ entries, fromDate, currentIndex }, "active_queue");
+    store.put({ entries, fromDate, toDate, currentIndex }, "active_queue");
   } catch (e) {
     console.error("Failed to save import queue to IndexedDB:", e);
   }
 };
 
-export const getImportQueue = async (): Promise<{ entries: any[]; fromDate: string | null; currentIndex: number } | null> => {
+export const getImportQueue = async (): Promise<{ entries: any[]; fromDate: string | null; toDate: string | null; currentIndex: number } | null> => {
   try {
     const db = await getDB();
     const tx = db.transaction(STORE_NAME, "readonly");
@@ -100,7 +100,7 @@ export const resumeGlobalImportIfNeeded = async (queryClient: any) => {
   const savedQueue = await getImportQueue();
   if (!savedQueue) return;
 
-  const { entries, fromDate, currentIndex } = savedQueue;
+  const { entries, fromDate, toDate, currentIndex } = savedQueue;
   if (currentIndex >= entries.length) {
     await clearImportQueue();
     return;
@@ -113,7 +113,8 @@ export const resumeGlobalImportIfNeeded = async (queryClient: any) => {
   // Run in background
   (async () => {
     try {
-      const CONCURRENCY_LIMIT = 15;
+      // Supabase (PostgreSQL) handles bulk inserts well, but we need to stay under the statement timeout
+      const CONCURRENCY_LIMIT = 1000;
       for (let i = currentIndex; i < entries.length; i += CONCURRENCY_LIMIT) {
         const batch = entries.slice(i, i + CONCURRENCY_LIMIT);
         
@@ -134,7 +135,7 @@ export const resumeGlobalImportIfNeeded = async (queryClient: any) => {
         
         const nextIndex = Math.min(i + CONCURRENCY_LIMIT, entries.length);
         updateGlobalImportState(true, { current: nextIndex, total: entries.length });
-        await saveImportQueue(entries, fromDate, nextIndex);
+        await saveImportQueue(entries, fromDate, toDate, nextIndex);
       }
 
       await recordImport("timesheets", entries.length, queryClient);
@@ -225,12 +226,15 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
   }, []);
 
   const importEntries = useMutation({
-    mutationFn: async ({ entries, fromDate }: { entries: any[]; fromDate: string | null }) => {
+    mutationFn: async ({ entries, fromDate, toDate }: { entries: any[]; fromDate: string | null; toDate: string | null }) => {
       updateGlobalImportState(true, { current: 0, total: entries.length });
-      await saveImportQueue(entries, fromDate, 0);
+      await saveImportQueue(entries, fromDate, toDate, 0);
 
       try {
-        if (fromDate) {
+        if (fromDate && toDate) {
+          const { error } = await supabase.from('time_entries').delete().gte('date', fromDate).lte('date', toDate);
+          if (error) throw error;
+        } else if (fromDate) {
           const { error } = await supabase.from('time_entries').delete().gte('date', fromDate);
           if (error) throw error;
         } else {
@@ -239,9 +243,8 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
           if (error) throw error;
         }
 
-        // To prevent RESOURCE_EXHAUSTED connection pool limits on Data Connect,
-        // we batch requests at a moderate concurrency (75 parallel requests max)
-        const CONCURRENCY_LIMIT = 15;
+        // Supabase (PostgreSQL) handles bulk inserts well, but we need to stay under the statement timeout
+        const CONCURRENCY_LIMIT = 1000;
         
         for (let i = 0; i < entries.length; i += CONCURRENCY_LIMIT) {
           const batch = entries.slice(i, i + CONCURRENCY_LIMIT);
@@ -263,7 +266,7 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
           
           const nextIndex = Math.min(i + CONCURRENCY_LIMIT, entries.length);
           updateGlobalImportState(true, { current: nextIndex, total: entries.length });
-          await saveImportQueue(entries, fromDate, nextIndex);
+          await saveImportQueue(entries, fromDate, toDate, nextIndex);
         }
 
         await recordImport("timesheets", entries.length, queryClient);
@@ -381,6 +384,7 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
     const entries = [];
     const errors = [];
     let earliestDate: string | null = null;
+    let latestDate: string | null = null;
 
     for (let i = 1; i < lines.length; i++) {
       const cells = lines[i];
@@ -394,6 +398,9 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
       
       if (!earliestDate || parsedDate < earliestDate) {
         earliestDate = parsedDate;
+      }
+      if (!latestDate || parsedDate > latestDate) {
+        latestDate = parsedDate;
       }
 
       const hVal = parseFloat(cells[col.hours]?.replace(/[^\d.-]/g, ''));
@@ -468,9 +475,9 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
 
     if (!entries.length) { toast.error("No valid entries found in file"); return; }
     
-    // Use the earliest date found in the file as the overwrite point
+    // Use the exact date range found in the file as the overwrite window
     updateGlobalImportState(true, { current: 0, total: entries.length });
-    importEntries.mutate({ entries, fromDate: earliestDate });
+    importEntries.mutate({ entries, fromDate: earliestDate, toDate: latestDate });
   };
 
   const handleFileUpload = (file: File) => {
@@ -555,7 +562,7 @@ export const TimesheetsImport = ({ lastImported }: { lastImported?: any }) => {
 
         <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>When you upload a file, the system will automatically find the earliest date in your CSV and <strong>replace all existing timesheets from that date onwards</strong> to prevent duplicates.</span>
+          <span>When you upload a file, the system will automatically find the earliest and latest date in your CSV and <strong>safely replace existing timesheets within that exact date range</strong> to prevent duplicates.</span>
         </div>
 
         {/* Drag and Drop Zone */}

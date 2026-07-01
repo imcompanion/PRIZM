@@ -323,6 +323,34 @@ export async function runSync() {
     logger.error("Failed to load Scopes for opportunity number mapping", err);
   }
 
+  // Fetch existing projects to prevent duplicate key constraint on opportunity_number (Handle pagination > 1000)
+  const existingProjects: any[] = [];
+  let page = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from("projects" as any)
+      .select("id, opportunity_number, title")
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+    
+    if (error) {
+      logger.error("Failed to fetch existing projects for deduplication", error);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    existingProjects.push(...data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+
+  const oppNumberToExistingId = new Map<string, string>();
+  const titleToExistingId = new Map<string, string>();
+  
+  for (const p of existingProjects) {
+    if (p.opportunity_number) oppNumberToExistingId.set(p.opportunity_number.toLowerCase().trim(), p.id);
+    if (p.title) titleToExistingId.set(p.title.toLowerCase().trim(), p.id);
+  }
+
   const projectsResponse = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
     range: "Data summary - P&L phased (de-risked)!B5:Z",
@@ -332,12 +360,25 @@ export async function runSync() {
   const projectsBatchMap = new Map<string, any>();
 
   const projectMap = new Map<string, string>(); // oppName -> id
+  const usedOppNumbers = new Set<string>();
 
   for (const row of projectsRows) {
     const title = row[0];
     if (!title) continue;
 
-    const projectId = uuidv5(`project_${title}`, NAMESPACE);
+    let oppNumber = titleToOppNumber.get(title.trim()) || null;
+    let oppNumberLower = oppNumber ? oppNumber.toLowerCase().trim() : null;
+    let titleLower = title.toLowerCase().trim();
+
+    let projectId;
+    if (oppNumberLower && oppNumberToExistingId.has(oppNumberLower)) {
+       projectId = oppNumberToExistingId.get(oppNumberLower)!;
+    } else if (titleToExistingId.has(titleLower)) {
+       projectId = titleToExistingId.get(titleLower)!;
+    } else {
+       projectId = uuidv5(`project_${title}`, NAMESPACE);
+    }
+
     projectMap.set(title, projectId);
 
     const createdDate = parseDate(row[7]);
@@ -347,8 +388,16 @@ export async function runSync() {
 
     if (!startDate || !endDate) continue;
 
+    if (oppNumber) {
+       if (usedOppNumbers.has(oppNumberLower!)) {
+          logger.warn(`Duplicate Opportunity Number found in sheet: ${oppNumber} for project ${title}. Nulling to prevent crash.`);
+          oppNumber = null;
+       } else {
+          usedOppNumbers.add(oppNumberLower!);
+       }
+    }
+
     const price = parseNumber(row[11]);
-    const oppNumber = titleToOppNumber.get(title.trim()) || null;
     const oppRecordType = title.toLowerCase().includes("rfp") || title.toLowerCase().includes("rfi")
       ? "Agency - RFP / RFI"
       : "Agency - Execution";

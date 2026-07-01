@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,13 @@ export interface InfluencerGroup {
   multiImage: number;
   shortVideo: number;
   storyFrames: number;
+  customName?: string;
+  useUsageOverride?: boolean;
+  organicUsageWeeksOverride?: number | null;
+  paidUsageWeeksOverride?: number | null;
+  exclusivityWeeksOverride?: number | null;
+  multiplierPopular?: boolean;
+  multiplierNiche?: boolean;
 }
 
 export interface CrossPlatformLink {
@@ -85,6 +93,13 @@ const makeGroup = (index: number): InfluencerGroup => ({
   multiImage: 0,
   shortVideo: 0,
   storyFrames: 0,
+  customName: "",
+  useUsageOverride: false,
+  organicUsageWeeksOverride: null,
+  paidUsageWeeksOverride: null,
+  exclusivityWeeksOverride: null,
+  multiplierPopular: false,
+  multiplierNiche: false,
 });
 
 const makeGiftingTier = (): GiftingTier => ({
@@ -114,21 +129,40 @@ export const defaultTalentBudget: TalentBudgetState = {
 };
 
 /* ─── small helpers ─── */
-function NumInput({ value, onChange, min = 0, placeholder, formatted }: { value: number; onChange: (v: number) => void; min?: number; placeholder?: string; formatted?: boolean }) {
+function NumInput({ value, onChange, min = 0, placeholder, formatted, suffix, className }: { value: number; onChange: (v: number) => void; min?: number; placeholder?: string; formatted?: boolean; suffix?: string; className?: string }) {
   const [editing, setEditing] = useState(false);
-  const display = !editing && formatted && value ? value.toLocaleString() : (value || "");
+  const sharedClasses = `flex items-center rounded-md border border-input bg-transparent shadow-sm transition-colors ${className || "h-8 w-24 text-sm px-3 py-1"}`;
+
+  if (!editing) {
+    let finalStr = "";
+    if (value === 0) {
+      finalStr = placeholder === "-" ? "-" : "0";
+    } else {
+      finalStr = formatted ? Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(value).toLowerCase() : value.toString();
+    }
+
+    return (
+      <div 
+        className={`${sharedClasses} cursor-text ${className?.includes('text-center') ? 'justify-center' : ''}`}
+        onClick={() => setEditing(true)}
+      >
+        <span className="truncate">{finalStr}</span>
+        {suffix && <span className="text-[10px] text-muted-foreground ml-1">{suffix.trim()}</span>}
+      </div>
+    );
+  }
+
   return (
     <Input
-      type={editing || !formatted ? "number" : "text"}
+      type="number"
       min={min}
-      className="h-8 w-24 text-sm"
-      value={display}
       placeholder={placeholder || "0"}
-      onFocus={() => formatted && setEditing(true)}
-      onBlur={() => formatted && setEditing(false)}
+      value={value === 0 ? "" : value}
+      className={`${className || "h-8 w-24 text-sm"} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+      onBlur={() => setEditing(false)}
+      autoFocus
       onChange={(e) => {
-        const raw = e.target.value.replace(/,/g, "");
-        onChange(Math.max(min, Number(raw) || 0));
+        onChange(Math.max(min, Number(e.target.value) || 0));
       }}
     />
   );
@@ -206,14 +240,14 @@ export function TalentBudgetTab({ state, onChange, office, currencySymbol }: Tal
           {/* Boosters */}
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Usage Boosters</p>
           <div className="flex flex-col lg:flex-row lg:flex-wrap gap-x-8 gap-y-4">
-            <FieldRow label="Organic Usage (weeks)" className="flex-1 min-w-[200px]">
-              <NumInput value={state.organicUsageWeeks} onChange={(v) => update({ organicUsageWeeks: v })} />
+            <FieldRow label="Organic Usage" className="flex-1 min-w-[200px]">
+              <NumInput value={state.organicUsageWeeks} onChange={(v) => update({ organicUsageWeeks: v })} suffix=" wks" />
             </FieldRow>
-            <FieldRow label="Paid Usage (weeks)" className="flex-1 min-w-[200px]">
-              <NumInput value={state.paidUsageWeeks} onChange={(v) => update({ paidUsageWeeks: v })} />
+            <FieldRow label="Paid Usage" className="flex-1 min-w-[200px]">
+              <NumInput value={state.paidUsageWeeks} onChange={(v) => update({ paidUsageWeeks: v })} suffix=" wks" />
             </FieldRow>
-            <FieldRow label="Exclusivity (weeks)" className="flex-1 min-w-[200px]">
-              <NumInput value={state.exclusivityWeeks} onChange={(v) => update({ exclusivityWeeks: v })} />
+            <FieldRow label="Exclusivity" className="flex-1 min-w-[200px]">
+              <NumInput value={state.exclusivityWeeks} onChange={(v) => update({ exclusivityWeeks: v })} suffix=" wks" />
             </FieldRow>
           </div>
 
@@ -268,92 +302,173 @@ export function TalentBudgetTab({ state, onChange, office, currencySymbol }: Tal
         </Badge>
       </div>
 
-      {/* Contracted Influencer Groups */}
+      {/* Creator Costs Groups */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Contracted Influencers</CardTitle>
+            <CardTitle className="text-base">Creator Costs</CardTitle>
             <Button variant="outline" size="sm" onClick={addGroup} disabled={state.groups.length >= 40}>
               <Plus className="h-3 w-3 mr-1" /> Add Group
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {state.groups.map((g, i) => (
-            <div key={g.id} className="rounded-md border p-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Group {i + 1}</span>
-                {state.groups.length > 1 && (
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground" onClick={() => removeGroup(g.id)}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Platform</Label>
-                  <Select value={g.platform} onValueChange={(v) => updateGroup(g.id, { platform: v })}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {PLATFORMS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground"># Influencers</Label>
-                  <NumInput value={g.influencers} onChange={(v) => updateGroup(g.id, { influencers: v })} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Tier</Label>
-                  <Select value={g.tier} onValueChange={(v) => updateGroup(g.id, { tier: v, avgFollowers: TIER_AVG_FOLLOWERS[v] || 0 })}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {TIERS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Territory</Label>
-                  <Select value={g.territory} onValueChange={(v) => updateGroup(g.id, { territory: v })}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {territories.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Avg Followers</Label>
-                  <NumInput value={g.avgFollowers} onChange={(v) => updateGroup(g.id, { avgFollowers: v })} formatted />
-                </div>
-                <div className="flex items-end gap-2 pb-0.5">
-                  <Switch checked={g.reposting} onCheckedChange={(v) => updateGroup(g.id, { reposting: v })} />
-                  <Label className="text-xs">Reposting</Label>
-                </div>
-              </div>
-              <Separator />
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Deliverables per Influencer</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Single Image</Label>
-                  <NumInput value={g.singleImage} onChange={(v) => updateGroup(g.id, { singleImage: v })} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Multi Image</Label>
-                  <NumInput value={g.multiImage} onChange={(v) => updateGroup(g.id, { multiImage: v })} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Short Video</Label>
-                  <NumInput value={g.shortVideo} onChange={(v) => updateGroup(g.id, { shortVideo: v })} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Story Frames</Label>
-                  <NumInput value={g.storyFrames} onChange={(v) => updateGroup(g.id, { storyFrames: v })} />
-                </div>
-              </div>
-            </div>
-          ))}
+        <CardContent>
+          <div className="w-full overflow-hidden border rounded-md">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-muted/50 text-muted-foreground">
+                <tr>
+                  <th className="font-medium p-2 border-b w-[40px]" title="Group"></th>
+                  <th className="font-medium p-2 border-b w-[120px]" title="Platform">Platform</th>
+                  <th className="font-medium p-2 border-b w-[60px] text-center" title="Number of Influencers">#</th>
+                  <th className="font-medium p-2 border-b w-[110px]" title="Tier">Tier</th>
+                  <th className="font-medium p-2 border-b w-[110px]" title="Territory">Territory</th>
+                  <th className="font-medium p-2 border-b w-[70px]" title="Average Followers">Avg</th>
+                  <th className="font-medium p-2 border-b w-[55px] text-center" title="Single Image">SI</th>
+                  <th className="font-medium p-2 border-b w-[55px] text-center" title="Multi Image">MI</th>
+                  <th className="font-medium p-2 border-b w-[55px] text-center" title="Short Video">SV</th>
+                  <th className="font-medium p-2 border-b w-[55px] text-center" title="Story Frames">SF</th>
+                  <th className="font-medium p-2 border-b w-[60px] text-center" title="Deliverables">Total</th>
+                  <th className="font-medium p-2 border-b w-[30px]"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.groups.map((g, i) => {
+                  const delivs = (g.singleImage + g.multiImage + g.shortVideo + g.storyFrames) * g.influencers;
+                  const hasOverrides = g.customName || g.reposting || g.useUsageOverride || g.multiplierPopular || g.multiplierNiche;
+                  return (
+                    <tr key={g.id} className="border-b last:border-0 hover:bg-muted/10 transition-colors">
+                      <td className="p-1 text-center">
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="ghost" size="sm" className={`h-7 w-7 p-0 ${hasOverrides ? 'text-pink-500 font-bold' : 'text-muted-foreground font-medium'} rounded-full hover:bg-muted`} title={g.customName || g.name}>
+                              {i + 1}{hasOverrides && <span className="text-[10px] absolute top-0.5 right-0.5 text-pink-500">•</span>}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-64 p-4 shadow-xl" align="start">
+                            <div className="space-y-4">
+                              <div className="space-y-2">
+                                <Label className="text-xs font-semibold">Custom Group Name</Label>
+                                <Input className="h-8 text-sm" placeholder={`Group ${i + 1}`} value={g.customName || ""} onChange={(e) => updateGroup(g.id, { customName: e.target.value })} />
+                              </div>
+                              <Separator />
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs font-semibold">Reposting</Label>
+                                <Switch checked={g.reposting} onCheckedChange={(v) => updateGroup(g.id, { reposting: v })} />
+                              </div>
+                              <Separator />
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <Label className="text-xs font-semibold">Usage Override</Label>
+                                  <Switch checked={g.useUsageOverride} onCheckedChange={(v) => updateGroup(g.id, { useUsageOverride: v })} />
+                                </div>
+                                {g.useUsageOverride && (
+                                  <div className="grid grid-cols-3 gap-2">
+                                    <div className="space-y-1 text-center">
+                                      <Label className="text-[10px] text-muted-foreground block">Organic</Label>
+                                      <NumInput className="h-7 text-xs w-full text-center" placeholder="-" value={g.organicUsageWeeksOverride ?? 0} onChange={(v) => updateGroup(g.id, { organicUsageWeeksOverride: v || null })} suffix=" wks" />
+                                    </div>
+                                    <div className="space-y-1 text-center">
+                                      <Label className="text-[10px] text-muted-foreground block">Paid</Label>
+                                      <NumInput className="h-7 text-xs w-full text-center" placeholder="-" value={g.paidUsageWeeksOverride ?? 0} onChange={(v) => updateGroup(g.id, { paidUsageWeeksOverride: v || null })} suffix=" wks" />
+                                    </div>
+                                    <div className="space-y-1 text-center">
+                                      <Label className="text-[10px] text-muted-foreground block">Exclusivity</Label>
+                                      <NumInput className="h-7 text-xs w-full text-center" placeholder="-" value={g.exclusivityWeeksOverride ?? 0} onChange={(v) => updateGroup(g.id, { exclusivityWeeksOverride: v || null })} suffix=" wks" />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              <Separator />
+                              <div className="space-y-3">
+                                <Label className="text-xs font-semibold">Row Multipliers</Label>
+                                <div className="flex items-center justify-between">
+                                  <Label className="text-xs font-normal">Popular (+40%)</Label>
+                                  <Switch checked={g.multiplierPopular} onCheckedChange={(v) => updateGroup(g.id, { multiplierPopular: v })} />
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <Label className="text-xs font-normal">Niche/Special (+30%)</Label>
+                                  <Switch checked={g.multiplierNiche} onCheckedChange={(v) => updateGroup(g.id, { multiplierNiche: v })} />
+                                </div>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </td>
+                      <td className="p-1">
+                        <Select value={g.platform} onValueChange={(v) => updateGroup(g.id, { platform: v })}>
+                          <SelectTrigger className="h-7 text-xs px-1"><SelectValue placeholder="Select" /></SelectTrigger>
+                          <SelectContent>
+                            {PLATFORMS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="p-1">
+                        <NumInput className="h-7 w-full text-xs px-1 text-center" value={g.influencers} onChange={(v) => updateGroup(g.id, { influencers: v })} />
+                      </td>
+                      <td className="p-1">
+                        <Select value={g.tier} onValueChange={(v) => updateGroup(g.id, { tier: v, avgFollowers: TIER_AVG_FOLLOWERS[v] || 0 })}>
+                          <SelectTrigger className="h-7 text-xs px-1 truncate"><SelectValue placeholder="Select" /></SelectTrigger>
+                          <SelectContent>
+                            {TIERS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="p-1">
+                        <Select value={g.territory} onValueChange={(v) => updateGroup(g.id, { territory: v })}>
+                          <SelectTrigger className="h-7 text-xs px-1 truncate"><SelectValue placeholder="Select" /></SelectTrigger>
+                          <SelectContent>
+                            {territories.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="p-1">
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="h-7 w-full text-xs px-1 font-normal text-left justify-start bg-transparent shadow-none border-transparent hover:border-border truncate">
+                              {g.avgFollowers === 0 ? "0" : Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(g.avgFollowers).toLowerCase()}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-48 p-3" align="center">
+                            <div className="space-y-2">
+                              <Label className="text-xs text-muted-foreground font-medium">Override Average Followers</Label>
+                              <Input
+                                type="number"
+                                className="h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                value={g.avgFollowers || ""}
+                                onChange={(e) => updateGroup(g.id, { avgFollowers: Number(e.target.value) || 0 })}
+                              />
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </td>
+                      <td className="p-1">
+                        <NumInput className="h-7 w-full text-xs px-0.5 text-center" value={g.singleImage} onChange={(v) => updateGroup(g.id, { singleImage: v })} />
+                      </td>
+                      <td className="p-1">
+                        <NumInput className="h-7 w-full text-xs px-0.5 text-center" value={g.multiImage} onChange={(v) => updateGroup(g.id, { multiImage: v })} />
+                      </td>
+                      <td className="p-1">
+                        <NumInput className="h-7 w-full text-xs px-0.5 text-center" value={g.shortVideo} onChange={(v) => updateGroup(g.id, { shortVideo: v })} />
+                      </td>
+                      <td className="p-1">
+                        <NumInput className="h-7 w-full text-xs px-0.5 text-center" value={g.storyFrames} onChange={(v) => updateGroup(g.id, { storyFrames: v })} />
+                      </td>
+                      <td className="p-1 text-center text-muted-foreground">
+                        {delivs || "-"}
+                      </td>
+                      <td className="p-1 text-center">
+                        {state.groups.length > 1 && (
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive" onClick={() => removeGroup(g.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
 
@@ -445,7 +560,24 @@ export function TalentBudgetTab({ state, onChange, office, currencySymbol }: Tal
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Avg Followers</Label>
-                    <NumInput value={t.avgFollowers} onChange={(v) => updateGiftingTier(t.id, { avgFollowers: v })} formatted />
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="h-8 w-24 text-sm px-2 font-normal text-left justify-start">
+                          {t.avgFollowers === 0 ? "0" : Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(t.avgFollowers).toLowerCase()}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-48 p-3" align="center">
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground font-medium">Override Average Followers</Label>
+                          <Input
+                            type="number"
+                            className="h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            value={t.avgFollowers || ""}
+                            onChange={(e) => updateGiftingTier(t.id, { avgFollowers: Number(e.target.value) || 0 })}
+                          />
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">

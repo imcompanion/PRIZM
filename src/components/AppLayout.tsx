@@ -9,23 +9,18 @@ import {
   TrendingUp,
   Settings,
   Receipt,
-  Database,
-  Sparkles,
-  Wand2,
   FolderKanban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { AnalyticsDrawer } from "@/components/analytics/AnalyticsDrawer";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, ShieldAlert } from "lucide-react";
+import { LogOut } from "lucide-react";
 
 const mainNav = [
   { to: "/utilisation", icon: Users, label: "Time & Utilisation" },
   { to: "/profitability", icon: TrendingUp, label: "Profitability" },
   { to: "/client-portfolio", icon: FolderKanban, label: "Client Portfolio" },
   { to: "/projects", icon: Briefcase, label: "Projects" },
-  { to: "/scoping", icon: Wand2, label: "Auto-Scope" },
+
   { to: "/fee-calculator", icon: CalendarDays, label: "Fee Calculator" },
 ];
 
@@ -53,7 +48,6 @@ const NavItem = ({ item }: { item: { to: string; icon: React.ElementType; label:
 );
 
 const AppLayout = () => {
-  const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const { appUser, signOut, user } = useAuth();
 
   return (
@@ -97,15 +91,6 @@ const AppLayout = () => {
       </aside>
       <main className="flex-1 overflow-auto relative bg-[#faf8f5] text-stone-900">
         <Outlet />
-        {/* Floating AI button */}
-        <Button
-          onClick={() => setAnalyticsOpen(true)}
-          className="fixed bottom-5 right-5 h-12 w-12 rounded-full shadow-lg z-40"
-          size="icon"
-        >
-          <Sparkles className="h-5 w-5" />
-        </Button>
-        <AnalyticsDrawer open={analyticsOpen} onOpenChange={setAnalyticsOpen} />
       </main>
     </div>
   );

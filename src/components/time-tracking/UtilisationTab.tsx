@@ -1,14 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useMemo, useEffect } from "react";
-import { format, eachDayOfInterval, isWeekend } from "date-fns";
+import {  format, eachDayOfInterval, isWeekend , eachWeekOfInterval, startOfWeek, endOfWeek, isBefore, isAfter, min } from "date-fns";
 import { buildParentalLeaveMap, isOnParentalLeave } from "@/lib/parental-leave";
 import { cn } from "@/lib/utils";
 import {
@@ -51,6 +52,13 @@ const matchesOffice = (office: string | null, filter: "Global" | "UK" | "US") =>
   return false;
 };
 
+
+function getUtilisationColorClass(utilisation: number, expected: number) {
+  if (utilisation >= expected) return "bg-green-100 text-green-900";
+  if (utilisation >= expected - 5) return "bg-yellow-100 text-yellow-900";
+  return "bg-red-100 text-red-800";
+}
+
 const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: UtilisationTabProps) => {
   const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
   const [selectedPerson, setSelectedPerson] = useState<{
@@ -86,6 +94,31 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
   });
 
   // Fetch aggregated utilisation data server-side (grouped by person+project)
+    const { data: rawTimeEntries = [] } = useQuery({
+    queryKey: ["raw_time_entries_for_completeness", format(startDate, "yyyy-MM-dd"), format(endDate, "yyyy-MM-dd")],
+    queryFn: async () => {
+      let allData: any[] = [];
+      let from = 0;
+      const PAGE_SIZE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("time_entries")
+          .select("person_id, date, hours")
+          .gte("date", format(startDate, "yyyy-MM-dd"))
+          .lte("date", format(endDate, "yyyy-MM-dd"))
+          .order("date", { ascending: false })
+          .order("person_id", { ascending: true }) 
+          .order("id", { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        allData = allData.concat(data || []);
+        if (!data || data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+      return allData;
+    }
+  });
+
   const { data: utilisationSummary = [] } = useQuery({
     queryKey: ["utilisation_summary", format(startDate, "yyyy-MM-dd"), format(endDate, "yyyy-MM-dd")],
     queryFn: async () => {
@@ -96,7 +129,10 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
         const { data, error } = await supabase.rpc("get_utilisation_summary", {
           _start_date: format(startDate, "yyyy-MM-dd"),
           _end_date: format(endDate, "yyyy-MM-dd"),
-        }).range(from, from + PAGE_SIZE - 1);
+        })
+        .order("person_id", { ascending: true })
+        .order("project_id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
         allData = allData.concat(data || []);
         if (!data || data.length < PAGE_SIZE) break;
@@ -188,6 +224,8 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
   const parentalLeaveMap = useMemo(() => buildParentalLeaveMap(people), [people]);
 
   const personSummaries = useMemo(() => {
+    try {
+
     const allowedTeams = new Set(["account management", "strategy", "strategy and innovation", "creative team", "paid media", "project management", "business affairs", "data"]);
 
     // Build name+team -> sibling IDs for the same team (handles people who moved
@@ -230,6 +268,7 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
       expectedTotalHours: number; expectedBillableHours: number;
       actualHours: number; billableHours: number; leaveHours: number;
       hoursSet: boolean; countedDays: Set<string>; hasEnded: boolean;
+      accurateCompleteness: number;
     }>();
 
     for (const person of people) {
@@ -319,6 +358,69 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
 
         const overallEnd2 = person.overall_end_date ? new Date(person.overall_end_date) : null;
         const hasEnded = overallEnd2 ? overallEnd2 < new Date() : false;
+        // ----------------------------------------------------
+        // compute accurate weekly capped completeness
+        // ----------------------------------------------------
+        const today = new Date();
+        const personEffectiveEnd = today < endDate ? today : endDate;
+        
+        let completenessSum = 0;
+        let completenessCount = 0;
+        let accurateCompleteness = 0;
+
+        // Group their raw time entries by week
+        const entriesForPerson = rawTimeEntries.filter((r: any) => siblingIds.has(r.person_id));
+        const hoursByWeek = new Map();
+        for (const r of entriesForPerson) {
+          if (!r.date) continue;
+          const d = new Date(r.date);
+          if (isNaN(d.getTime())) continue;
+          const ws = startOfWeek(d, { weekStartsOn: 1 }).toISOString();
+          hoursByWeek.set(ws, (hoursByWeek.get(ws) || 0) + Number(r.hours));
+        }
+
+        // Generate all weeks in the period
+        let pStart = startOfWeek(effectiveStart, { weekStartsOn: 1 });
+        let pEnd = endOfWeek(personEffectiveEnd, { weekStartsOn: 1 });
+        if (pStart <= pEnd) {
+          const weeks = eachWeekOfInterval({ start: pStart, end: pEnd }, { weekStartsOn: 1 });
+          
+          for (const weekStart of weeks) {
+            const wEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
+            
+            let clampedStart = weekStart;
+            let clampedEnd = wEnd > personEffectiveEnd ? personEffectiveEnd : wEnd;
+            
+            // Clamp to employment dates
+            const empStart = person.employment_start_date ? new Date(person.employment_start_date) : null;
+            const empEnd = person.overall_end_date ? new Date(person.overall_end_date) : (person.employment_end_date ? new Date(person.employment_end_date) : null);
+            
+            if (empStart && empStart > clampedStart) clampedStart = empStart;
+            if (empEnd && empEnd < clampedEnd) clampedEnd = empEnd;
+            
+            if (clampedEnd < clampedStart) continue; // Not employed this week
+            
+            // Calculate expected hours for this specific week
+            let weekExpectedDays = 0;
+            const weekDays = eachDayOfInterval({ start: clampedStart, end: clampedEnd });
+            for (const d of weekDays) {
+              if (!isWeekend(d) && !isOnParentalLeave(d, leaveIntervals)) {
+                weekExpectedDays++;
+              }
+            }
+            const weekExpected = weekExpectedDays * 7.5;
+            
+            if (weekExpected > 0) {
+              const actual = hoursByWeek.get(weekStart.toISOString()) || 0;
+              completenessSum += Math.min(actual / weekExpected, 1);
+              completenessCount++;
+            }
+          }
+        }
+
+        accurateCompleteness = completenessCount > 0 ? (completenessSum / completenessCount) * 100 : 0;
+        accurateCompleteness = accurateCompleteness || 0;
+
 
         deduped.set(dedupKey, {
           id: person.id,
@@ -335,6 +437,7 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
           hoursSet: true,
           countedDays,
           hasEnded,
+          accurateCompleteness,
         });
       }
     }
@@ -358,6 +461,8 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
       for (const r of sortedHistory) {
         if (uniqueRoles[uniqueRoles.length - 1] !== r.name) uniqueRoles.push(r.name);
       }
+
+
       const displayRole = uniqueRoles.length > 0 ? uniqueRoles.join(" → ") : entry.role;
 
       map.set(entry.id, {
@@ -371,13 +476,21 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
         billableHours: entry.billableHours,
         leaveHours: entry.leaveHours,
         hasEnded: entry.hasEnded,
+        accurateCompleteness: entry.accurateCompleteness || 0
       });
     }
     return map;
-  }, [people, hoursByPerson, startDate, endDate, officeFilter, parentalLeaveMap]);
+
+    } catch (e) {
+      console.error("CRASH IN PERSON SUMMARIES", e);
+      return new Map();
+    }
+  }, [people, hoursByPerson, startDate, endDate, officeFilter, parentalLeaveMap, rawTimeEntries]);
 
   // Team summaries computed directly from lightweight summaries
   const teamSummaries = useMemo(() => {
+    try {
+
     const teamMap = new Map<string, {
       team: string; count: number;
       totalExpected: number; totalExpectedBillable: number;
@@ -414,6 +527,11 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
           expectedUtilisation: t.totalExpected > 0 ? (t.totalExpectedBillable / t.totalExpected) * 100 : 0,
         };
       });
+
+    } catch (e) {
+      console.error("CRASH IN TEAM SUMMARIES", e);
+      return [];
+    }
   }, [personSummaries, showFormer]);
 
   // Only compute person rows for expanded teams (deferred)
@@ -425,7 +543,7 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
       const workingHours = p.actualHours - p.leaveHours;
       members.push({
         ...p,
-        completeness: p.expectedTotalHours > 0 ? Math.min((p.actualHours / p.expectedTotalHours) * 100, 100) : 0,
+        completeness: p.accurateCompleteness,
         utilisation: workingHours > 0 ? (p.billableHours / workingHours) * 100 : 0,
         expectedUtilisation: p.expectedTotalHours > 0 ? (p.expectedBillableHours / p.expectedTotalHours) * 100 : 0,
       });
@@ -495,7 +613,7 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
         name: p.name,
         team: p.team,
         role: p.role,
-        completeness: Math.round(p.expectedTotalHours > 0 ? Math.min((p.actualHours / p.expectedTotalHours) * 100, 100) : 0),
+        completeness: Math.round(p.accurateCompleteness),
         utilisation: Math.round(workingHours > 0 ? (p.billableHours / workingHours) * 100 : 0),
         actualHours: Math.round(p.actualHours),
         expectedHours: Math.round(p.expectedTotalHours),
@@ -526,7 +644,7 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
     const out: Array<{ name: string; completeness: number; actualHours: number; expectedHours: number }> = [];
     for (const p of personSummaries.values()) {
       if (!showFormer && p.hasEnded) continue;
-      const completeness = p.expectedTotalHours > 0 ? Math.min((p.actualHours / p.expectedTotalHours) * 100, 100) : 0;
+      const completeness = p.accurateCompleteness;
       out.push({ name: p.name, completeness, actualHours: p.actualHours, expectedHours: p.expectedTotalHours });
     }
     return out;
@@ -603,7 +721,7 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
                     );
                   }} />
                   <YAxis type="number" domain={[0, 100]} hide />
-                  <Tooltip formatter={(v: number) => [`${fmt(v)}%`, "Completeness"]} />
+                  <RechartsTooltip formatter={(v: number) => [`${fmt(v)}%`, "Completeness"]} />
                   
                   <Bar dataKey="completeness" radius={[4, 4, 0, 0]} barSize={32}>
                     {completenessChartData.map((entry, i) => (
@@ -646,7 +764,7 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
                     );
                   }} />
                   <YAxis type="number" domain={[0, 100]} hide />
-                  <Tooltip formatter={(v: number, name: string) => [`${fmt(v)}%`, name === "expectedUtilisation" ? "Benchmark" : "Actual"]} />
+                  <RechartsTooltip formatter={(v: number, name: string) => [`${fmt(v)}%`, name === "expectedUtilisation" ? "Benchmark" : "Actual"]} />
                   <Bar dataKey="utilisation" radius={[4, 4, 0, 0]} barSize={16} name="Actual">
                     {utilisationChartData.map((entry, i) => (
                       <Cell key={i} fill={getUtilisationColor(entry.utilisation, entry.expectedUtilisation)} />
@@ -750,10 +868,18 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className={cn("text-sm font-medium px-1.5 py-0.5 rounded", utilisation >= expectedUtilisation - 5 ? "bg-green-100 text-green-900" : utilisation >= expectedUtilisation - 10 ? "bg-red-100 text-red-800" : "bg-red-200 text-red-900")}>
-                          {fmt(utilisation)}%
-                        </span>
-                        <span className="text-sm text-muted-foreground"> / {fmt(expectedUtilisation)}%</span>
+                        <TooltipProvider>
+                          <Tooltip delayDuration={300}>
+                            <TooltipTrigger asChild>
+                              <span className={cn("text-sm font-medium px-1.5 py-0.5 rounded cursor-help", getUtilisationColorClass(utilisation, expectedUtilisation))}>
+                                {fmt(utilisation)}%
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Expected: {fmt(expectedUtilisation)}%</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </TableCell>
                     </TableRow>
                     {isExpanded &&
@@ -795,10 +921,18 @@ const UtilisationTab = ({ startDate, endDate, officeFilter, showFormer }: Utilis
                             </div>
                           </TableCell>
                           <TableCell>
-                            <span className={cn("text-sm px-1.5 py-0.5 rounded", m.utilisation >= m.expectedUtilisation - 5 ? "bg-green-100 text-green-900" : m.utilisation >= m.expectedUtilisation - 10 ? "bg-red-100 text-red-800" : "bg-red-200 text-red-900")}>
-                              {fmt(m.utilisation)}%
-                            </span>
-                            <span className="text-sm text-muted-foreground"> / {fmt(m.expectedUtilisation)}%</span>
+                            <TooltipProvider>
+                              <Tooltip delayDuration={300}>
+                                <TooltipTrigger asChild>
+                                  <span className={cn("text-sm px-1.5 py-0.5 rounded cursor-help", getUtilisationColorClass(m.utilisation, m.expectedUtilisation))}>
+                                    {fmt(m.utilisation)}%
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Expected: {fmt(m.expectedUtilisation)}%</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           </TableCell>
                         </TableRow>
                       ))}

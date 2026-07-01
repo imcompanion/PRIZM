@@ -23,14 +23,30 @@ function computeMonthlyHours(
   projectStart: Date,
   projectEnd: Date,
   scopedHours: number,
-  phasePercentages: Record<string, number>
+  phasePercentagesRaw: Record<string, any>
 ): Record<string, number> {
   if (scopedHours <= 0) return {};
+  
+  const parsePct = (v: any): number => {
+    if (v == null) return 0;
+    const parsed = parseFloat(String(v).replace(/[%]/g, ""));
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  const hasAnyPct = Object.values(phasePercentagesRaw || {}).some(v => parsePct(v) > 0);
+  const phaseCount = hasAnyPct ? 12 : 4;
+  const effectivePcts: Record<string, any> = hasAnyPct 
+    ? (phasePercentagesRaw || {})
+    : { "Phase 1": 30, "Phase 2": 30, "Phase 3": 20, "Phase 4": 20 };
+
   const totalDays = Math.max(1, Math.round((projectEnd.getTime() - projectStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-  const daysPerPhase = totalDays / 12;
+  const daysPerPhase = totalDays / phaseCount;
   const monthlyHours: Record<string, number> = {};
-  for (let phase = 1; phase <= 12; phase++) {
-    const pct = phasePercentages[`Phase ${phase}`] ?? phasePercentages[`phase ${phase}`] ?? phasePercentages[`Phase${phase}`] ?? phasePercentages[String(phase)] ?? 0;
+
+  for (let phase = 1; phase <= phaseCount; phase++) {
+    const rawVal = effectivePcts[`Phase ${phase}`] ?? effectivePcts[`phase ${phase}`] ?? effectivePcts[`Phase${phase}`] ?? effectivePcts[`phase${phase}`] ?? effectivePcts[String(phase)];
+    const pct = parsePct(rawVal);
+    
     if (pct <= 0) continue;
     const phaseHours = (pct / 100) * scopedHours;
     const phaseStartDay = Math.round((phase - 1) * daysPerPhase);

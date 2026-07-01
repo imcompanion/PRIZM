@@ -232,11 +232,10 @@ export function calculateCreatorCosts(
   const benchmarks = getBenchmarks(office);
   const multiplierAdj = campaignMultiplierAdj(tb.timePressure, tb.seasonal, tb.restrictedGoods);
 
-  // Global boosters (used when group doesn't have overrides — but our UI doesn't have overrides yet)
+  // Global boosters (baseline)
   const globalOrganic = organicBooster(tb.organicUsageWeeks);
   const globalPaid = paidBooster(tb.paidUsageWeeks);
   const globalExcl = exclusivityBooster(tb.exclusivityWeeks);
-  const totalBoosterPct = globalOrganic + globalPaid + globalExcl; // AM25
 
   const DELIVERABLE_KEYS: { key: keyof InfluencerGroup; benchSuffix: string }[] = [
     { key: "singleImage",  benchSuffix: "Single Image" },
@@ -278,14 +277,27 @@ export function calculateCreatorCosts(
       contentFeePerInfl += fee * count;
     }
 
+    // Group specific boosters
+    const org = g.useUsageOverride ? (g.organicUsageWeeksOverride ?? tb.organicUsageWeeks) : tb.organicUsageWeeks;
+    const pd = g.useUsageOverride ? (g.paidUsageWeeksOverride ?? tb.paidUsageWeeks) : tb.paidUsageWeeks;
+    const excl = g.useUsageOverride ? (g.exclusivityWeeksOverride ?? tb.exclusivityWeeks) : tb.exclusivityWeeks;
+    
+    const organicBoost = organicBooster(org);
+    const paidBoost = paidBooster(pd);
+    const exclBoost = exclusivityBooster(excl);
+    const totalBoosterPct = organicBoost + paidBoost + exclBoost;
+
     // Reposting: 40% uplift on content fee (BE25)
     const repostingPerInfl = g.reposting ? contentFeePerInfl * 0.4 : 0;
 
     // Booster: content fee × total booster % (BF25)
     const boosterFeePerInfl = contentFeePerInfl * totalBoosterPct;
 
-    // Multiplier: content fee × adjusted multiplier (BG25)
-    const multiplierFeePerInfl = contentFeePerInfl * multiplierAdj;
+    // Multiplier: content fee × adjusted multiplier (BG25) + group specific multipliers
+    let groupMultiplierAdj = multiplierAdj;
+    if (g.multiplierPopular) groupMultiplierAdj += 0.40;
+    if (g.multiplierNiche) groupMultiplierAdj += 0.30;
+    const multiplierFeePerInfl = contentFeePerInfl * groupMultiplierAdj;
 
     // Total fee per influencer (BH25)
     const totalFeePerInfl = contentFeePerInfl + repostingPerInfl + boosterFeePerInfl + multiplierFeePerInfl;
@@ -294,7 +306,7 @@ export function calculateCreatorCosts(
     const totalImpressions = impressionsPerInfl * g.influencers;           // BJ25
     const totalContentFee = (contentFeePerInfl + repostingPerInfl) * g.influencers; // BK25
     const totalFee = totalFeePerInfl * g.influencers;                      // BL25
-    const paidMediaFee = (contentFeePerInfl * globalPaid) * g.influencers; // BC25
+    const paidMediaFee = (contentFeePerInfl * paidBoost) * g.influencers; // BC25
     const companionCreatorCost = totalFee * 0.03;                          // BM25
 
     const totalDeliverables = g.influencers * DELIVERABLE_KEYS.reduce((s, d) => s + ((g[d.key] as number) || 0), 0);

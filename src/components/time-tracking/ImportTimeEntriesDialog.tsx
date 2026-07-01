@@ -47,9 +47,20 @@ const ImportTimeEntriesDialog = () => {
 
   const importEntries = useMutation({
     mutationFn: async (rows: { person_id: string; project_id: string | null; date: string; hours: number; notes: string | null; project_name: string | null }[]) => {
-      // Delete all existing time entries first
-      const { error: deleteError } = await supabase.from("time_entries").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      if (rows.length === 0) return;
+      
+      const dates = rows.map(r => r.date).sort();
+      const minDate = dates[0];
+      const maxDate = dates[dates.length - 1];
+
+      // Delete existing time entries within this exact date range
+      const { error: deleteError } = await supabase.from("time_entries")
+        .delete()
+        .gte("date", minDate)
+        .lte("date", maxDate);
+        
       if (deleteError) throw deleteError;
+      
       // Insert in batches of 500 to avoid payload limits
       const BATCH_SIZE = 500;
       for (let i = 0; i < rows.length; i += BATCH_SIZE) {
@@ -213,7 +224,7 @@ const ImportTimeEntriesDialog = () => {
             — and paste below.
           </p>
           <p className="text-xs text-muted-foreground">
-            Projects are matched by <strong>Project Code</strong> (Opportunity Number). This import updates <strong>time entries only</strong> and never creates or renames projects.
+            Projects are matched by <strong>Project Code</strong> (Opportunity Number). This will safely overwrite existing timesheets <strong>only within the exact date range</strong> found in your pasted data.
           </p>
           <Textarea
             rows={8}

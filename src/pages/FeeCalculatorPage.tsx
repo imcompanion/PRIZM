@@ -207,6 +207,9 @@ function Section({
   children,
   alwaysOn,
   insight,
+  uncollapsible,
+  expandSignal,
+  collapseSignal,
 }: {
   icon: React.ElementType;
   title: string;
@@ -215,16 +218,26 @@ function Section({
   children: React.ReactNode;
   alwaysOn?: boolean;
   insight?: { label: string; ratio: number; projectCount: number } | null;
+  uncollapsible?: boolean;
+  expandSignal?: number;
+  collapseSignal?: number;
 }) {
   const [open, setOpen] = useState(enabled);
 
-  // Auto-open when toggled on
   useEffect(() => {
     if (enabled) setOpen(true);
   }, [enabled]);
 
+  useEffect(() => {
+    if (expandSignal && expandSignal > 0) setOpen(true);
+  }, [expandSignal]);
+
+  useEffect(() => {
+    if (collapseSignal && collapseSignal > 0 && !uncollapsible) setOpen(false);
+  }, [collapseSignal]);
+
   return (
-    <Collapsible open={open && enabled} onOpenChange={setOpen}>
+    <Collapsible open={uncollapsible ? true : (open && enabled)} onOpenChange={setOpen}>
       <div className="border border-border rounded-lg overflow-hidden bg-card">
         <div className="flex items-center justify-between px-4 py-3 bg-muted/30">
           <div className="flex items-center gap-3">
@@ -242,11 +255,13 @@ function Section({
               </span>
             )}
           </div>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!enabled}>
-              {open && enabled ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </Button>
-          </CollapsibleTrigger>
+          {!uncollapsible && (
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!enabled}>
+                {open && enabled ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              </Button>
+            </CollapsibleTrigger>
+          )}
         </div>
         <CollapsibleContent>
           <div className="px-4 py-4 space-y-4">
@@ -385,6 +400,9 @@ function FeeCalculatorPageInner() {
   });
 
   const [appliedRecs, setAppliedRecs] = useState<Recommendation[]>([]);
+  const [expandAllSignal, setExpandAllSignal] = useState(0);
+  const [collapseAllSignal, setCollapseAllSignal] = useState(0);
+  const [isAllCollapsed, setIsAllCollapsed] = useState(false);
 
   const updateSection = <K extends keyof FeeCalcState["sections"]>(
     key: K,
@@ -779,13 +797,31 @@ function FeeCalculatorPageInner() {
     <div className="flex h-[calc(100vh-4rem)] w-full overflow-hidden bg-background">
       {/* Left Panel: Inputs (65%) */}
       <div className="flex-1 overflow-y-auto p-6 border-r border-border space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground mb-1">Fee Calculator</h1>
-          <p className="text-sm text-muted-foreground mb-6">Configure project scope and calculate fees</p>
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground mb-1">Fee Calculator</h1>
+            <p className="text-sm text-muted-foreground">Configure project scope and calculate fees</p>
+          </div>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => {
+              if (window.confirm("Are you sure you want to start a new scope? This will clear all current inputs.")) {
+                setState(defaultState);
+                setCurrentStep(0);
+                setAppliedRecs([]);
+                sessionStorage.removeItem("fee-calc-state");
+                sessionStorage.removeItem("fee-calc-step");
+              }
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            New Scope
+          </Button>
         </div>
 
         {/* Step 1: Project Setup */}
-          <Section icon={Settings2} title="Overview" enabled={true} onToggle={() => {}} alwaysOn>
+          <Section icon={Settings2} title="Overview" enabled={true} onToggle={() => {}} alwaysOn uncollapsible>
             <FieldRow label="Office">
               <Select value={state.office} onValueChange={(v: "UK" | "US") => setState((s) => ({ ...s, office: v, currency: v === "US" ? "USD" : "GBP", talentBudget: { ...s.talentBudget, talentContingencyPct: v === "US" ? 25 : 10 } }))}>
                 <SelectTrigger className="h-9">
@@ -801,7 +837,7 @@ function FeeCalculatorPageInner() {
               <Popover open={clientOpen} onOpenChange={setClientOpen}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" role="combobox" aria-expanded={clientOpen} className="h-9 w-full justify-between font-normal">
-                    {state.client === "__new__" ? "➕ New Client" : state.client || "Select client..."}
+                    {state.client || "Select client..."}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
@@ -811,17 +847,7 @@ function FeeCalculatorPageInner() {
                     <CommandList>
                       <CommandEmpty>No clients found.</CommandEmpty>
                       <CommandGroup>
-                        <CommandItem
-                          value="__new__"
-                          onSelect={() => {
-                            setState((s) => ({ ...s, client: "__new__", projectName: "", oppNumber: "" }));
-                            setSelectedProjectId("");
-                            setClientOpen(false);
-                          }}
-                        >
-                          <Plus className="mr-1 h-3 w-3" />
-                          New Client
-                        </CommandItem>
+
                         {clients.map((c) => (
                           <CommandItem
                             key={c}
@@ -842,11 +868,8 @@ function FeeCalculatorPageInner() {
               </Popover>
             </FieldRow>
 
-            {state.client === "__new__" ? (
-              <FieldRow label="Client Name">
-                <Input value={state.projectName} onChange={(e) => setState((s) => ({ ...s, projectName: e.target.value }))} className="h-9" placeholder="Enter client name" />
-              </FieldRow>
-            ) : state.client ? (
+
+            {state.client && (
               <FieldRow label="Project">
                 <Popover open={projectOpen} onOpenChange={setProjectOpen}>
                   <PopoverTrigger asChild>
@@ -908,15 +931,9 @@ function FeeCalculatorPageInner() {
                   </PopoverContent>
                 </Popover>
               </FieldRow>
-            ) : null}
-
-            {state.client === "__new__" && (
-              <FieldRow label="Project Name">
-                <Input className="h-9" placeholder="Enter project name" />
-              </FieldRow>
             )}
 
-            {!selectedProjectId && state.client && state.client !== "__new__" && (
+            {!selectedProjectId && state.client && (
               <FieldRow label="Project Name">
                 <Input value={state.projectName} onChange={(e) => setState((s) => ({ ...s, projectName: e.target.value }))} className="h-9" placeholder="Enter project name" />
               </FieldRow>
@@ -1016,6 +1033,26 @@ function FeeCalculatorPageInner() {
               )}
             </FieldRow>
           </Section>
+
+          <div className="flex justify-end my-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              className="text-xs h-8"
+              onClick={() => {
+                if (isAllCollapsed) {
+                  setExpandAllSignal(s => s + 1);
+                  setIsAllCollapsed(false);
+                } else {
+                  setCollapseAllSignal(s => s + 1);
+                  setIsAllCollapsed(true);
+                }
+              }}
+            >
+              {isAllCollapsed ? "Expand All" : "Collapse All"}
+            </Button>
+          </div>
+
         {/* Step 2: Services */}
             <Section
               icon={Users}
@@ -1024,6 +1061,8 @@ function FeeCalculatorPageInner() {
               onToggle={(v) => updateSection("projectManagement", { enabled: v })}
               alwaysOn
               insight={getInsight("projectManagement")}
+              expandSignal={expandAllSignal}
+              collapseSignal={collapseAllSignal}
             >
               <FieldRow label="Involvement">
                 <Select
@@ -1048,6 +1087,8 @@ function FeeCalculatorPageInner() {
               enabled={s.creative.enabled}
               onToggle={(v) => updateSection("creative", { enabled: v })}
               insight={getInsight("creative")}
+              expandSignal={expandAllSignal}
+              collapseSignal={collapseAllSignal}
             >
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ideation</p>
               <FieldRow label="Creative Concepts">
@@ -1100,6 +1141,8 @@ function FeeCalculatorPageInner() {
               enabled={s.strategy.enabled}
               onToggle={(v) => updateSection("strategy", { enabled: v })}
               insight={getInsight("strategy")}
+              expandSignal={expandAllSignal}
+              collapseSignal={collapseAllSignal}
             >
               <div className="space-y-3">
                 {[
@@ -1125,6 +1168,8 @@ function FeeCalculatorPageInner() {
               enabled={s.talentContent.enabled}
               onToggle={(v) => updateSection("talentContent", { enabled: v })}
               insight={getInsight("talentContent")}
+              expandSignal={expandAllSignal}
+              collapseSignal={collapseAllSignal}
             >
               <FieldRow label="Influencer Brief Revisions">
                 <NumberInput value={s.talentContent.influencerBriefRevisions} onChange={(v) => updateSection("talentContent", { influencerBriefRevisions: v })} />
@@ -1158,6 +1203,8 @@ function FeeCalculatorPageInner() {
               enabled={s.paidMedia.enabled}
               onToggle={(v) => updateSection("paidMedia", { enabled: v })}
               insight={getInsight("paidMedia")}
+              expandSignal={expandAllSignal}
+              collapseSignal={collapseAllSignal}
             >
               <FieldRow label="Consultancy /month">
                 <Select
@@ -1215,6 +1262,8 @@ function FeeCalculatorPageInner() {
               enabled={s.productionCosts.enabled}
               onToggle={(v) => updateSection("productionCosts", { enabled: v })}
               insight={getInsight("productionCosts")}
+              expandSignal={expandAllSignal}
+              collapseSignal={collapseAllSignal}
             >
               <FieldRow label="Budget Phase">
                 <Select value={s.productionCosts.productionBudgetPhase} onValueChange={(v) => updateSection("productionCosts", { productionBudgetPhase: v })}>
@@ -1253,6 +1302,8 @@ function FeeCalculatorPageInner() {
               enabled={s.productProcurement.enabled}
               onToggle={(v) => updateSection("productProcurement", { enabled: v })}
               insight={getInsight("productProcurement")}
+              expandSignal={expandAllSignal}
+              collapseSignal={collapseAllSignal}
             >
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Shipments</p>
               <FieldRow label="Influencer Total">
@@ -1283,6 +1334,8 @@ function FeeCalculatorPageInner() {
               enabled={s.reporting.enabled}
               onToggle={(v) => updateSection("reporting", { enabled: v })}
               insight={getInsight("reporting")}
+              expandSignal={expandAllSignal}
+              collapseSignal={collapseAllSignal}
             >
               <FieldRow label="Ongoing Involvement">
                 <Select
@@ -1319,6 +1372,8 @@ function FeeCalculatorPageInner() {
               enabled={s.otherServices.enabled}
               onToggle={(v) => updateSection("otherServices", { enabled: v })}
               insight={getInsight("otherServices")}
+              expandSignal={expandAllSignal}
+              collapseSignal={collapseAllSignal}
             >
               <FieldRow label="AR Filters #">
                 <NumberInput value={s.otherServices.arFilters} onChange={(v) => updateSection("otherServices", { arFilters: v })} />
